@@ -14,13 +14,13 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 app = FastAPI(title="OFERTA IA")
 
 class Product(BaseModel):
-name: str
-store: str | None = None
-url: str | None = None
-affiliate_url: str | None = None
-old_price: float | None = None
-current_price: float | None = None
-category: str | None = None
+    name: str
+    store: str | None = None
+    url: str | None = None
+    affiliate_url: str | None = None
+    old_price: float | None = None
+    current_price: float | None = None
+    category: str | None = None
 
 HTML = """<!doctype html>
 <html lang="pt-BR">
