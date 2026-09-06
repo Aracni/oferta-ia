@@ -3,7 +3,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from supabase import create_client
-import requests
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -308,20 +307,26 @@ loadProducts();
 </html>"""
 
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
+OPENAI_API_KEY =GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 def generate_ai_offer(product: dict, analysis: dict) -> str:
-    if not OPENAI_API_KEY:
-        raise HTTPException(500, "OPENAI_API_KEY não configurada no Render.")
+    if not GEMINI_API_KEY:
+        raise HTTPException(500, "GEMINI_API_KEY não configurada no Render.")
 
     prompt = f"""Você é um especialista em copywriting para ofertas de e-commerce no Brasil.
-Crie uma oferta curta, convincente e pronta para WhatsApp/Telegram/Instagram.
-Use SOMENTE os dados fornecidos abaixo. Não invente características, avaliações, frete, garantia, estoque, prazo ou benefícios que não estejam nos dados.
+Crie uma oferta curta, convincente e pronta para WhatsApp, Telegram ou Instagram.
+Use SOMENTE os dados fornecidos abaixo. Não invente características, avaliações, frete, garantia, estoque, prazo ou benefícios.
 Não diga que o produto é o melhor, mais barato ou imperdível sem evidência.
 Use português do Brasil.
-Estrutura: título chamativo, preço anterior e atual, desconto, economia e uma chamada para ação.
+
+Estrutura desejada:
+1. título chamativo
+2. preço anterior e preço atual
+3. percentual de desconto
+4. economia
+5. chamada para ação
 
 Produto: {product.get('name')}
 Loja: {product.get('store') or 'não informada'}
@@ -330,42 +335,25 @@ Preço anterior: R$ {float(product.get('old_price') or 0):.2f}
 Preço atual: R$ {float(product.get('current_price') or 0):.2f}
 Desconto calculado: {analysis.get('discount', 0):.2f}%
 Economia calculada: R$ {analysis.get('savings', 0):.2f}
+
+Retorne apenas o texto da oferta, sem explicar seu raciocínio.
 """
 
-    response = requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": OPENAI_MODEL,
-            "input": prompt,
-            "max_output_tokens": 300,
-        },
-        timeout=45,
-    )
-
-    if not response.ok:
-        try:
-            detail = response.json().get("error", {}).get("message", response.text)
-        except Exception:
-            detail = response.text
-        raise HTTPException(502, f"OpenAI: {detail}")
-
-    data = response.json()
-    if data.get("output_text"):
-        return data["output_text"].strip()
-
-    parts = []
-    for item in data.get("output", []):
-        for content in item.get("content", []):
-            if content.get("type") == "output_text" and content.get("text"):
-                parts.append(content["text"])
-    text = "\n".join(parts).strip()
-    if not text:
-        raise HTTPException(502, "A IA respondeu sem texto.")
-    return text
+    try:
+        from google import genai
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+        )
+        text = (response.text or "").strip()
+        if not text:
+            raise HTTPException(502, "O Gemini respondeu sem texto.")
+        return text
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Gemini: {exc}")
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -384,9 +372,9 @@ def generate_offer(payload: dict):
     analysis = payload.get("analysis") or {}
     if not product.get("name"):
         raise HTTPException(400, "Produto inválido.")
+
     text = generate_ai_offer(product, analysis)
 
-    # Guarda uma cópia da oferta gerada no Supabase, sem bloquear a exibição caso o salvamento falhe.
     try:
         supabase.table("offers").insert({
             "product_id": product.get("id"),
@@ -399,7 +387,7 @@ def generate_offer(payload: dict):
     except Exception:
         pass
 
-    return {"text": text, "model": OPENAI_MODEL}
+    return {"text": text, "model": GEMINI_MODEL}
 
 
 @app.get("/api/products")
