@@ -64,6 +64,7 @@ input{width:100%;padding:13px;border:1px solid #d7dce5;border-radius:12px;font-s
 .empty{color:#667085;text-align:center;padding:20px}
 nav{display:flex;gap:8px;overflow:auto;margin:18px 0}
 nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;white-space:nowrap}
+.channel-tabs{display:flex;gap:6px;overflow:auto;margin-bottom:10px}.tab{background:#eef2f6;color:#172033;padding:9px 11px;font-size:12px;white-space:nowrap}.tab.active{background:#111827;color:white}.copy-text{white-space:pre-wrap;line-height:1.55;background:white;border-radius:12px;padding:12px;border:1px solid #e4e7ec}.copy-btn{width:100%;margin-top:10px;background:#475467}.hashtags{margin-top:10px;font-size:13px;line-height:1.5}.hashtags div{margin-top:5px;color:#475467}
 @media(min-width:700px){.grid{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:480px){.offer-data{grid-template-columns:1fr 1fr 1fr}.metric{font-size:12px}.metric b{font-size:15px}}
 </style>
@@ -161,18 +162,63 @@ function scoreClass(score){
     return 'low';
 }
 
-function generateOffer(p, analysis, aiText){
+function escapeHtml(text){
+    return String(text || '').replace(/[&<>"']/g, function(c){
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c];
+    });
+}
+
+function generateOffer(p, analysis, generated){
     const store = p.store ? ' na ' + p.store : '';
     const link = p.affiliate_url || p.url;
+    const whatsapp = generated.whatsapp || generated.raw || '';
+    const instagram = generated.instagram || whatsapp;
+    const telegram = generated.telegram || whatsapp;
+    const hashtags = generated.hashtags || '';
+
     return `
         <div class="offer-box">
-            <div style="white-space:pre-wrap;line-height:1.55">${aiText || ''}</div>
+            <div style="font-weight:800;margin-bottom:10px">🤖 Oferta criada pelo Gemini</div>
+            <div class="channel-tabs">
+                <button class="tab active" onclick="showChannel(this,'whatsapp')">💬 WhatsApp</button>
+                <button class="tab" onclick="showChannel(this,'instagram')">📸 Instagram</button>
+                <button class="tab" onclick="showChannel(this,'telegram')">✈️ Telegram</button>
+            </div>
+            <div class="channel-content" data-channel="whatsapp"><div class="copy-text">${escapeHtml(whatsapp)}</div></div>
+            <div class="channel-content" data-channel="instagram" style="display:none"><div class="copy-text">${escapeHtml(instagram)}</div></div>
+            <div class="channel-content" data-channel="telegram" style="display:none"><div class="copy-text">${escapeHtml(telegram)}</div></div>
+            <button class="copy-btn" onclick="copyCurrent(this)">📋 Copiar texto</button>
+            ${hashtags ? '<div class="hashtags"><strong>#️⃣ Hashtags</strong><div>' + escapeHtml(hashtags) + '</div></div>' : ''}
             <hr style="border:0;border-top:1px solid #ddd;margin:14px 0">
             <div><strong>💰 Economia:</strong> ${money(analysis.savings)} · <strong>${analysis.discount.toFixed(2).replace('.', ',')}% OFF</strong>${store}</div>
-            ${link ? '<a class="buy-btn" href="' + link + '" target="_blank" rel="noopener">🛒 Ver oferta</a>' : ''}
+            ${link ? '<a class="buy-btn" href="' + escapeHtml(link) + '" target="_blank" rel="noopener">🛒 Ver oferta</a>' : ''}
         </div>
     `;
 }
+
+function showChannel(button, channel){
+    const box = button.closest('.offer-box');
+    box.querySelectorAll('.channel').forEach(function(){ });
+    box.querySelectorAll('.channel-content').forEach(function(el){
+        el.style.display = el.dataset.channel === channel ? 'block' : 'none';
+    });
+    box.querySelectorAll('.tab').forEach(function(tab){ tab.classList.remove('active'); });
+    button.classList.add('active');
+}
+
+async function copyCurrent(button){
+    const box = button.closest('.offer-box');
+    const visible = Array.from(box.querySelectorAll('.channel-content')).find(el => el.style.display !== 'none');
+    const text = visible ? visible.querySelector('.copy-text').innerText : '';
+    try{
+        await navigator.clipboard.writeText(text);
+        button.textContent = '✅ Copiado!';
+        setTimeout(() => button.textContent = '📋 Copiar texto', 1500);
+    }catch(e){
+        alert('Não foi possível copiar automaticamente.');
+    }
+}
+
 
 async function loadProducts(){
     try{
@@ -265,7 +311,7 @@ async function showOffer(index){
         });
         const data = await response.json();
         if(!response.ok){ throw new Error(data.detail || 'Erro ao gerar oferta'); }
-        box.innerHTML = generateOffer(p, analysis, data.text);
+        box.innerHTML = generateOffer(p, analysis, data);
     }catch(error){
         box.innerHTML = '<div class="offer-box">⚠️ ' + (error.message || 'Não foi possível gerar a oferta.') + '</div>';
     }
@@ -337,22 +383,28 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 
 
-def generate_ai_offer(product: dict, analysis: dict) -> str:
+def generate_ai_offer(product: dict, analysis: dict) -> dict:
     if not GEMINI_API_KEY:
         raise HTTPException(500, "GEMINI_API_KEY não configurada no Render.")
 
     prompt = f"""Você é um especialista em copywriting para ofertas de e-commerce no Brasil.
-Crie uma oferta curta, convincente e pronta para WhatsApp, Telegram ou Instagram.
-Use SOMENTE os dados fornecidos abaixo. Não invente características, avaliações, frete, garantia, estoque, prazo ou benefícios.
-Não diga que o produto é o melhor, mais barato ou imperdível sem evidência.
+Crie três versões da mesma oferta, usando SOMENTE os dados fornecidos.
+Não invente características, avaliações, frete, garantia, estoque, prazo ou benefícios.
 Use português do Brasil.
 
-Estrutura desejada:
-1. título chamativo
-2. preço anterior e preço atual
-3. percentual de desconto
-4. economia
-5. chamada para ação
+Retorne EXATAMENTE neste formato, mantendo os marcadores:
+[WHATSAPP]
+texto curto, direto e com emojis
+[/WHATSAPP]
+[INSTAGRAM]
+texto para legenda do Instagram, com chamada para ação
+[/INSTAGRAM]
+[TELEGRAM]
+texto curto para Telegram, com chamada para ação
+[/TELEGRAM]
+[HASHTAGS]
+até 8 hashtags relacionadas ao produto/categoria
+[/HASHTAGS]
 
 Produto: {product.get('name')}
 Loja: {product.get('store') or 'não informada'}
@@ -361,8 +413,6 @@ Preço anterior: R$ {float(product.get('old_price') or 0):.2f}
 Preço atual: R$ {float(product.get('current_price') or 0):.2f}
 Desconto calculado: {analysis.get('discount', 0):.2f}%
 Economia calculada: R$ {analysis.get('savings', 0):.2f}
-
-Retorne apenas o texto da oferta, sem explicar seu raciocínio.
 """
 
     try:
@@ -375,7 +425,22 @@ Retorne apenas o texto da oferta, sem explicar seu raciocínio.
         text = (response.text or "").strip()
         if not text:
             raise HTTPException(502, "O Gemini respondeu sem texto.")
-        return text
+
+        def section(tag: str) -> str:
+            import re
+            m = re.search(rf"\[{tag}\](.*?)\[/{tag}\]", text, re.S | re.I)
+            return m.group(1).strip() if m else ""
+
+        result = {
+            "whatsapp": section("WHATSAPP"),
+            "instagram": section("INSTAGRAM"),
+            "telegram": section("TELEGRAM"),
+            "hashtags": section("HASHTAGS"),
+            "raw": text,
+        }
+        if not result["whatsapp"]:
+            result["whatsapp"] = text
+        return result
     except HTTPException:
         raise
     except Exception as exc:
@@ -399,13 +464,13 @@ def generate_offer(payload: dict):
     if not product.get("name"):
         raise HTTPException(400, "Produto inválido.")
 
-    text = generate_ai_offer(product, analysis)
+    generated = generate_ai_offer(product, analysis)
 
     try:
         supabase.table("offers").insert({
             "product_id": product.get("id"),
-            "title": text.splitlines()[0][:180] if text else product.get("name"),
-            "description": text,
+            "title": generated.get("whatsapp", product.get("name"))[:180],
+            "description": generated.get("raw", ""),
             "discount": analysis.get("discount"),
             "score": analysis.get("score"),
             "status": "generated",
@@ -413,7 +478,7 @@ def generate_offer(payload: dict):
     except Exception:
         pass
 
-    return {"text": text, "model": GEMINI_MODEL}
+    return {**generated, "model": GEMINI_MODEL}
 
 
 @app.get("/api/products")
@@ -446,3 +511,4 @@ def create_product(product: Product):
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
     return result.data[0]
+    
