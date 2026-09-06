@@ -1,4 +1,9 @@
 import os
+import json
+import re
+from html import unescape
+from urllib.parse import urljoin, urlparse
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -105,7 +110,9 @@ nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;wh
 <input name="name" placeholder="Nome do produto" required>
 <input name="store" placeholder="Loja">
 <input name="category" placeholder="Categoria">
-<input name="url" placeholder="Link do produto">
+<input name="url" placeholder="Cole o link do produto aqui" id="productUrl">
+<button type="button" id="importBtn" style="background:#2563eb">🔎 Buscar dados pelo link</button>
+<div id="importStatus" style="font-size:13px;color:#667085"></div>
 <input name="affiliate_url" placeholder="Link de afiliado">
 <input name="old_price" type="number" step="0.01" placeholder="Preço antigo">
 <input name="current_price" type="number" step="0.01" placeholder="Preço atual">
@@ -291,7 +298,7 @@ async function loadProducts(){
 
                 <div class="offer-data">
                     <div class="metric">
-                        Desconto
+                    Desconto
                         <b>${analysis.discount.toFixed(2).replace('.', ',')}%</b>
                     </div>
                     <div class="metric">
@@ -376,6 +383,55 @@ async function editProduct(index){
     document.getElementById('submitProductBtn').textContent = '💾 Salvar alterações';
     window.scrollTo({top: form.closest('.section').offsetTop - 10, behavior:'smooth'});
 }
+
+
+async function importProductFromUrl(){
+    const url = document.getElementById('productUrl').value.trim();
+    const status = document.getElementById('importStatus');
+
+    if(!url){
+        status.textContent = 'Cole primeiro o link do produto.';
+        return;
+    }
+
+    const btn = document.getElementById('importBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Buscando...';
+    status.textContent = 'Lendo os dados da página...';
+
+    try{
+        const response = await fetch('/api/import-product', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({url: url})
+        });
+
+        const data = await response.json();
+
+        if(!response.ok){
+            throw new Error(data.detail || 'Não foi possível ler o produto.');
+        }
+
+        const form = document.getElementById('productForm');
+
+        if(data.name) form.name.value = data.name;
+        if(data.store) form.store.value = data.store;
+        if(data.category) form.category.value = data.category;
+        if(data.url) form.url.value = data.url;
+        if(data.image_url) form.image_url.value = data.image_url;
+        if(data.old_price != null) form.old_price.value = data.old_price;
+        if(data.current_price != null) form.current_price.value = data.current_price;
+
+        status.textContent = '✅ Dados encontrados. Confira os campos antes de salvar.';
+    }catch(error){
+        status.textContent = '⚠️ ' + (error.message || 'Falha ao importar.');
+    }finally{
+        btn.disabled = false;
+        btn.textContent = '🔎 Buscar dados pelo link';
+    }
+}
+
+document.getElementById('importBtn').addEventListener('click', importProductFromUrl);
 
 document.getElementById('productForm').addEventListener('submit', async function(event){
     event.preventDefault();
@@ -500,6 +556,207 @@ def health():
     return {"status": "ok", "app": "OFERTA IA"}
 
 
+
+def _clean_text(value):
+    if value is None:
+        return None
+    value = unescape(str(value))
+    value = re.sub(r"\s+", " ", value).strip()
+    return value or None
+
+
+def _price_number(value):
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    s = str(value).strip()
+    s = re.sub(r"[^\d,.\-]", "", s)
+
+    if not s:
+        return None
+
+    # Trata formatos brasileiros e internacionais.
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        # "199.90" continua 199.90; "1.999" pode ser mil novecentos e noventa e nove.
+        parts = s.split(".")
+        if len(parts) == 2 and len(parts[1]) == 3:
+            s = "".join(parts)
+    try:
+        return float(s)
+    except Exception:
+        return None
+
+
+def _walk_jsonld(obj, found):
+    if isinstance(obj, dict):
+        found.append(obj)
+        for value in obj.values():
+            _walk_jsonld(value, found)
+    elif isinstance(obj, list):
+        for value in obj:
+            _walk_jsonld(value, found)
+
+
+def _extract_product_from_page(html, page_url):
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+    metas = {}
+
+    for tag in soup.find_all("meta"):
+        key = tag.get("property") or tag.get("name")
+        value = tag.get("content")
+        if key and value:
+            metas[key.lower()] = _clean_text(value)
+
+    title = metas.get("og:title") or metas.get("twitter:title")
+    image = metas.get("og:image") or metas.get("twitter:image")
+    description = metas.get("og:description") or metas.get("description")
+
+    if image:
+        image = urljoin(page_url, image)
+
+    json_objects = []
+    for script in soup.find_all("script", type="application/ld+json"):
+        raw = script.string or script.get_text()
+        if not raw:
+            continue
+        try:
+            _walk_jsonld(json.loads(raw), json_objects)
+        except Exception:
+            continue
+
+    product_obj = None
+    for obj in json_objects:
+        types = obj.get("@type") if isinstance(obj, dict) else None
+        types = types if isinstance(types, list) else [types]
+        if any(str(t).lower() == "product" for t in types if t):
+            product_obj = obj
+            break
+
+    if product_obj:
+        title = title or _clean_text(product_obj.get("name"))
+        image_value = product_obj.get("image")
+        if isinstance(image_value, list):
+            image_value = image_value[0] if image_value else None
+        image = image or (urljoin(page_url, image_value) if image_value else None)
+
+    offers = product_obj.get("offers") if product_obj else None
+    if isinstance(offers, list):
+        offers = offers[0] if offers else None
+    if not isinstance(offers, dict):
+        offers = {}
+
+    current_price = (
+        _price_number(offers.get("price"))
+        or _price_number(product_obj.get("price")) if product_obj else None
+    )
+
+    # Alguns sites expõem lowPrice/highPrice, mas não necessariamente o preço real.
+    if current_price is None:
+        current_price = _price_number(metas.get("product:price:amount"))
+
+    store = None
+    host = urlparse(page_url).netloc.lower()
+    host = host.split("@")[-1].split(":")[0]
+    if host.startswith("www."):
+        host = host[4:]
+    if host:
+        store = host.split(".")[0].replace("-", " ").title()
+
+    category = None
+    if product_obj:
+        category = _clean_text(product_obj.get("category"))
+
+    if not title and soup.title:
+        title = _clean_text(soup.title.get_text())
+
+    # Fallback simples para preço em páginas que não usam JSON-LD.
+    if current_price is None:
+        candidates = re.findall(
+            r"(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:,\d{2})|\d+(?:\.\d{2}))",
+            soup.get_text(" ", strip=True)
+        )
+        parsed = [_price_number(x) for x in candidates]
+        parsed = [x for x in parsed if x is not None and 1 <= x <= 1000000]
+        if parsed:
+            current_price = min(parsed)
+
+    # "Preço anterior" é propositalmente conservador: só usa dados estruturados
+    # quando o site realmente fornece um preço anterior.
+    old_price = None
+    if product_obj:
+        old_price = _price_number(product_obj.get("priceBefore"))
+    if old_price is None:
+        old_price = _price_number(metas.get("product:price:old"))
+
+    return {
+        "name": title,
+        "store": store,
+        "category": category,
+        "url": page_url,
+        "image_url": image,
+        "old_price": old_price,
+        "current_price": current_price,
+        "description": description,
+    }
+
+
+@app.post("/api/import-product")
+def import_product(payload: dict):
+    url = (payload.get("url") or "").strip()
+
+    if not url or not re.match(r"^https?://", url, re.I):
+        raise HTTPException(400, "Informe uma URL completa começando com http:// ou https://.")
+
+    try:
+        response = requests.get(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Linux; Android 10) "
+                    "AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36"
+                ),
+                "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+            },
+            timeout=15,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+
+        content_type = response.headers.get("content-type", "").lower()
+        if "html" not in content_type:
+            raise HTTPException(400, "O link não parece ser uma página de produto.")
+
+        data = _extract_product_from_page(response.text, response.url)
+
+        if not data.get("name"):
+            raise HTTPException(
+                422,
+                "A página abriu, mas não foi possível identificar o nome do produto."
+            )
+
+        data["source_url"] = response.url
+        return data
+
+    except HTTPException:
+        raise
+    except requests.RequestException as exc:
+        raise HTTPException(502, f"Não consegui acessar a página: {exc}")
+    except Exception as exc:
+        raise HTTPException(502, f"Falha ao interpretar a página: {exc}")
+
+
 @app.post("/api/generate-offer")
 def generate_offer(payload: dict):
     product = payload.get("product") or {}
@@ -555,3 +812,4 @@ def create_product(product: Product):
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
     return result.data[0]
+    
