@@ -160,7 +160,8 @@ nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;wh
 <div id="meliSearchBox" style="display:none;margin-top:12px">
 <input id="meliQuery" placeholder="Ex.: celular, air fryer, fone bluetooth">
 <input id="meliLimit" type="number" min="1" max="20" value="10" placeholder="Quantidade">
-<button type="button" id="meliSearchAction" style="margin-top:8px;background:#12b76a">🔎 Buscar no Mercado Livre</button>
+<button type="button" id="meliSearchAction" style="margin-top:8px;background:#12b76a">🔎 Buscar produtos no catálogo</button>
+<div id="meliCatalogHint" class="muted" style="margin-top:8px">Teste oficial do catálogo de produtos, usando sua autorização do Mercado Livre.</div>
 <div id="meliResults" style="margin-top:12px"></div>
 </div>
 </div>
@@ -1608,16 +1609,7 @@ def mercadolivre_diagnostico():
 
 @app.post("/api/mercadolivre/search")
 def mercadolivre_search(payload: dict):
-    """
-    Pesquisa pública de produtos no Mercado Livre.
-
-    Importante:
-    O endpoint /sites/MLB/search é um recurso de catálogo/busca pública.
-    Não enviamos o access_token OAuth do usuário nesta chamada, porque o
-    PolicyAgent pode bloquear um token de usuário em um endpoint público.
-    A conexão OAuth continua sendo usada para recursos protegidos que
-    realmente exigirem autorização.
-    """
+    """Pesquisa produtos de catálogo do Mercado Livre usando OAuth."""
     query = (payload.get("query") or "").strip()
     try:
         limit = max(1, min(20, int(payload.get("limit") or 10)))
@@ -1627,82 +1619,92 @@ def mercadolivre_search(payload: dict):
     if not query:
         raise HTTPException(400, "Informe um termo de busca.")
 
-    try:
-        headers = {
-            "User-Agent": "OFERTA-IA/1.0",
-            "Accept": "application/json",
-        }
+    connection = _get_connection("mercadolivre")
+    access_token = (connection or {}).get("access_token")
+    if not access_token:
+        raise HTTPException(401, "Mercado Livre não está conectado. Clique em Conectar Mercado Livre.")
 
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": "OFERTA-IA/1.0",
+        "Accept": "application/json",
+    }
+
+    try:
         r = requests.get(
-            "https://api.mercadolibre.com/sites/MLB/search",
-            params={"q": query, "limit": limit},
+            "https://api.mercadolibre.com/products/search",
+            params={
+                "status": "active",
+                "site_id": "MLB",
+                "q": query,
+                "limit": limit,
+            },
             timeout=20,
             headers=headers,
         )
 
-        if r.status_code == 401:
-            raise HTTPException(502, "O Mercado Livre recusou a pesquisa pública (401).")
-        if r.status_code == 403:
-            detail = r.text[:500]
+        if r.status_code in (401, 403):
+            detail = r.text[:700]
             raise HTTPException(
                 502,
-                "O Mercado Livre bloqueou a pesquisa pública (403). "
-                f"Detalhe: {detail}"
+                f"O Mercado Livre recusou a busca no catálogo ({r.status_code}). Detalhe: {detail}"
             )
 
         r.raise_for_status()
         raw = r.json()
 
         items = []
-        for x in raw.get("results", [])[:limit]:
-            original_price = x.get("original_price")
-            current_price = x.get("price")
+        for x in (raw.get("results") or [])[:limit]:
+            winner = x.get("buy_box_winner") or {}
+            price = winner.get("price")
+            original_price = winner.get("original_price")
             discount_rate = None
-
             try:
-                if original_price and current_price and float(original_price) > float(current_price):
+                if original_price and price and float(original_price) > float(price):
                     discount_rate = round(
-                        ((float(original_price) - float(current_price)) / float(original_price)) * 100,
+                        ((float(original_price) - float(price)) / float(original_price)) * 100,
                         2,
                     )
             except (TypeError, ValueError):
                 pass
 
-            seller = x.get("seller") or {}
-            shipping = x.get("shipping") or {}
+            pictures = x.get("pictures") or []
+            image_url = None
+            if pictures and isinstance(pictures[0], dict):
+                image_url = pictures[0].get("url")
 
             items.append({
-                "name": x.get("title"),
-                "store": str(seller.get("nickname") or "Mercado Livre"),
-                "url": x.get("permalink"),
-                "current_price": current_price,
+                "name": x.get("name"),
+                "product_id": x.get("id"),
+                "catalog_product_id": x.get("catalog_product_id") or x.get("id"),
+                "status": x.get("status"),
+                "domain_id": x.get("domain_id"),
+                "url": x.get("permalink") or (f"https://www.mercadolivre.com.br/p/{x.get('id')}" if x.get("id") else None),
+                "image_url": image_url,
+                "current_price": price,
                 "old_price": original_price,
                 "discount_rate": discount_rate,
-                "category": x.get("category_id"),
-                "image_url": x.get("thumbnail") or x.get("thumbnail_id"),
-                "item_id": x.get("id"),
-                "seller_id": seller.get("id"),
-                "condition": x.get("condition"),
-                "sales": x.get("sold_quantity"),
-                "rating": None,
-                "data_confidence": "medium",
-                "free_shipping": bool(shipping.get("free_shipping")),
+                "item_id": winner.get("item_id"),
+                "seller_id": winner.get("seller_id"),
+                "seller_reputation": (winner.get("seller") or {}).get("reputation_level_id"),
+                "shipping": winner.get("shipping") or {},
+                "buy_box_winner": bool(winner),
+                "data_confidence": "alta",
             })
 
         return {
             "query": query,
-            "total": raw.get("paging", {}).get("total", len(items)),
+            "source": "mercadolivre_catalog",
+            "total": (raw.get("paging") or {}).get("total", len(items)),
             "items": items,
-            "source": "mercadolivre_public_search",
-            "authenticated": False,
         }
 
     except HTTPException:
         raise
     except requests.RequestException as exc:
         raise HTTPException(502, f"Falha de comunicação com o Mercado Livre: {exc}")
-    except Exception as exc:
-        raise HTTPException(502, f"Falha ao pesquisar no Mercado Livre: {exc}")
+    except ValueError:
+        raise HTTPException(502, "O Mercado Livre retornou uma resposta inválida.")
 
 @app.post("/api/amazon/settings")
 def amazon_settings(payload: dict):
