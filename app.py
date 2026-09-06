@@ -502,9 +502,10 @@ def generate_offer(payload: dict):
     generated = generate_ai_offer(product, analysis)
 
     try:
-        supabase.table("offers").insert({
+        offer_data = {
             "product_id": product.get("id"),
             "title": generated.get("whatsapp", product.get("name"))[:180],
             "description": generated.get("raw", ""),
             "discount": analysis.get("discount"),
-            "score": anal
+            "score": analysis.get("score"),
+        
