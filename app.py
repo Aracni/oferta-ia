@@ -508,4 +508,58 @@ def generate_offer(payload: dict):
             "description": generated.get("raw", ""),
             "discount": analysis.get("discount"),
             "score": analysis.get("score"),
+
+                        "status": "generated"
+        }
+
+        supabase.table("offers").insert(offer_data).execute()
+
+    except Exception:
+        pass
+
+    return generated
+
+
+@app.put("/api/products/{product_id}")
+def update_product(product_id: int, product: Product):
+    result = (
+        supabase
+        .table("products")
+        .update(product.model_dump())
+        .eq("id", product_id)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(404, "Produto não encontrado.")
+
+    return result.data[0]
+
+
+@app.post("/api/products")
+def create_product(product: Product):
+    result = (
+        supabase
+        .table("products")
+        .insert(product.model_dump())
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(400, "Não foi possível cadastrar o produto.")
+
+    return result.data[0]
+
+
+@app.get("/api/products")
+def get_products():
+    result = (
+        supabase
+        .table("products")
+        .select("*")
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    return result.data
             
