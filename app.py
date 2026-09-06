@@ -441,63 +441,9 @@ async function loadProducts(){
 
             const store = p.store || '';
             const category = p.category || '';
-            const price = p.current_price != null ? money(p.current_price) : '';
-            const image = p.image_url ? '<img class="product-image" src="' + escapeHtml(p.image_url) + '" alt="" loading="lazy">' : '';
+            const price = p.current_price != null ? money(p.current_price) : ''
 
-            if(!analysis){
-                return `
-                <div class="product low">
-                    ${image}
-                    <strong>${escapeHtml(p.name || '')}</strong>
-                    <div>${store}${category ? ' · ' + category : ''}</div>
-                    ${price ? '<div class="price">' + price + '</div>' : ''}
-                    <div class="offer-box">⚠️ Preços insuficientes para calcular uma oferta.</div>
-                </div>`;
-            }
-
-            return `
-            <div class="product ${scoreClass(analysis.score)}" id="product-${index}">
-                ${image}
-                <strong>${escapeHtml(p.name || '')}</strong>
-                <div>${store}${category ? ' · ' + category : ''}</div>
-                <div class="old-price">${money(p.old_price)}</div>
-                <div class="price">${money(p.current_price)}</div>
-
-                <div class="offer-data">
-                    <div class="metric">
-                        Desconto
-                        <b>${analysis.discount.toFixed(2).replace('.', ',')}%</b>
-                    </div>
-                    <div class="metric">
-                        Economia
-                        <b>${money(analysis.savings)}</b>
-                    </div>
-                    <div class="metric score">
-                        Score
-                        <b>⭐ ${analysis.score}/100</b>
-                    </div>
-                </div>
-
-                <details style="margin-top:10px">
-                    <summary style="cursor:pointer;font-size:13px;color:#475467">
-                        🔎 Como chegamos ao score?
-                    </summary>
-                    <div style="margin-top:8px;font-size:12px;color:#475467;line-height:1.7">
-                        Desconto: <b>${analysis.breakdown.discount}/60</b> ·
-                        Economia: <b>${analysis.breakdown.savings}/15</b> ·
-                        Afiliado: <b>${analysis.breakdown.affiliate}/10</b> ·
-                        Link: <b>${analysis.breakdown.url}/5</b> ·
-                        Loja: <b>${analysis.breakdown.store}/5</b> ·
-                        Categoria: <b>${analysis.breakdown.category}/5</b>
-                    </div>
-                </details>
-
-                <button class="offer-btn" onclick="showOffer(${index})">
-                    🔥 Gerar oferta
-                </button>
-                <button style="margin-top:8px;width:100%;background:#475467" onclick="editProduct(${index})">✏️ Editar produto</button>
-
-                <div id="offer-${index}"></div>
+                            <div id="offer-${index}"></div>
             </div>`;
         }).join('');
 
@@ -1310,5 +1256,3 @@ def create_product(product: Product):
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
     return result.data[0]
-    
-    
