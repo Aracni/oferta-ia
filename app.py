@@ -106,7 +106,7 @@ nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;wh
 <input name="affiliate_url" placeholder="Link de afiliado">
 <input name="old_price" type="number" step="0.01" placeholder="Preço antigo">
 <input name="current_price" type="number" step="0.01" placeholder="Preço atual">
-<button type="submit">Cadastrar produto</button>
+<button type="submit" id="submitProductBtn">Cadastrar produto</button>
 </form>
 </div>
 </div>
@@ -234,6 +234,7 @@ async function loadProducts(){
                 <button class="offer-btn" onclick="showOffer(${index})">
                     🔥 Gerar oferta
                 </button>
+                <button style="margin-top:8px;width:100%;background:#475467" onclick="editProduct(${index})">✏️ Editar produto</button>
 
                 <div id="offer-${index}"></div>
             </div>`;
@@ -270,6 +271,24 @@ async function showOffer(index){
     }
 }
 
+async function editProduct(index){
+    const p = window.currentProducts[index];
+    if(!p) return;
+
+    const form = document.getElementById('productForm');
+    form.dataset.editId = p.id;
+    form.name.value = p.name || '';
+    form.store.value = p.store || '';
+    form.category.value = p.category || '';
+    form.url.value = p.url || '';
+    form.affiliate_url.value = p.affiliate_url || '';
+    form.old_price.value = p.old_price ?? '';
+    form.current_price.value = p.current_price ?? '';
+
+    document.getElementById('submitProductBtn').textContent = '💾 Salvar alterações';
+    window.scrollTo({top: form.closest('.section').offsetTop - 10, behavior:'smooth'});
+}
+
 document.getElementById('productForm').addEventListener('submit', async function(event){
     event.preventDefault();
 
@@ -285,21 +304,28 @@ document.getElementById('productForm').addEventListener('submit', async function
         current_price: form.get('current_price') ? Number(form.get('current_price')) : null
     };
 
-    const response = await fetch('/api/products', {
-        method: 'POST',
+    const editId = event.target.dataset.editId;
+    const endpoint = editId ? '/api/products/' + editId : '/api/products';
+    const method = editId ? 'PUT' : 'POST';
+
+    const response = await fetch(endpoint, {
+        method: method,
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body)
     });
 
     if(!response.ok){
-        alert('Não foi possível cadastrar o produto.');
+        const err = await response.json().catch(() => ({}));
+        alert(err.detail || 'Não foi possível salvar o produto.');
         return;
     }
 
     event.target.reset();
+    delete event.target.dataset.editId;
+    document.getElementById('submitProductBtn').textContent = 'Cadastrar produto';
     await loadProducts();
-    alert('Produto cadastrado com sucesso! 🎉');
-});
+    alert(editId ? 'Produto atualizado com sucesso! 🎉' : 'Produto cadastrado com sucesso! 🎉');
+});;
 
 loadProducts();
 </script>
@@ -401,10 +427,22 @@ def products():
     )
 
 
+@app.put("/api/products/{product_id}")
+def update_product(product_id: int, product: Product):
+    result = (
+        supabase.table("products")
+        .update(product.model_dump())
+        .eq("id", product_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(404, "Produto não encontrado.")
+    return result.data[0]
+
+
 @app.post("/api/products")
 def create_product(product: Product):
     result = supabase.table("products").insert(product.model_dump()).execute()
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
     return result.data[0]
-    
