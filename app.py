@@ -24,6 +24,7 @@ class Product(BaseModel):
     old_price: float | None = None
     current_price: float | None = None
     category: str | None = None
+    image_url: str | None = None
 
 
 HTML = """<!doctype html>
@@ -50,6 +51,7 @@ button.buy-btn{display:block;text-align:center;margin-top:14px;background:#11182
 input{width:100%;padding:13px;border:1px solid #d7dce5;border-radius:12px;font-size:15px}
 .products{display:grid;gap:10px}
 .product{background:white;border-radius:16px;padding:17px;box-shadow:0 3px 14px #00000009}
+.product-image{width:100%;max-height:240px;object-fit:contain;border-radius:12px;margin-bottom:12px;background:#f8fafc}
 .product strong{display:block;margin-bottom:5px;font-size:17px}
 .price{font-weight:800;font-size:20px;margin-top:7px}
 .old-price{text-decoration:line-through;color:#667085;font-size:14px}
@@ -107,6 +109,7 @@ nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;wh
 <input name="affiliate_url" placeholder="Link de afiliado">
 <input name="old_price" type="number" step="0.01" placeholder="Preço antigo">
 <input name="current_price" type="number" step="0.01" placeholder="Preço atual">
+<input name="image_url" placeholder="URL da imagem do produto">
 <button type="submit" id="submitProductBtn">Cadastrar produto</button>
 </form>
 </div>
@@ -265,11 +268,13 @@ async function loadProducts(){
             const store = p.store || '';
             const category = p.category || '';
             const price = p.current_price != null ? money(p.current_price) : '';
+            const image = p.image_url ? '<img class="product-image" src="' + escapeHtml(p.image_url) + '" alt="" loading="lazy" onerror="this.style.display='none'">' : '';
 
             if(!analysis){
                 return `
                 <div class="product low">
-                    <strong>${p.name || ''}</strong>
+                    ${image}
+                    <strong>${escapeHtml(p.name || '')}</strong>
                     <div>${store}${category ? ' · ' + category : ''}</div>
                     ${price ? '<div class="price">' + price + '</div>' : ''}
                     <div class="offer-box">⚠️ Preços insuficientes para calcular uma oferta.</div>
@@ -278,7 +283,8 @@ async function loadProducts(){
 
             return `
             <div class="product ${scoreClass(analysis.score)}" id="product-${index}">
-                <strong>${p.name || ''}</strong>
+                ${image}
+                <strong>${escapeHtml(p.name || '')}</strong>
                 <div>${store}${category ? ' · ' + category : ''}</div>
                 <div class="old-price">${money(p.old_price)}</div>
                 <div class="price">${money(p.current_price)}</div>
@@ -365,6 +371,7 @@ async function editProduct(index){
     form.affiliate_url.value = p.affiliate_url || '';
     form.old_price.value = p.old_price ?? '';
     form.current_price.value = p.current_price ?? '';
+    form.image_url.value = p.image_url || '';
 
     document.getElementById('submitProductBtn').textContent = '💾 Salvar alterações';
     window.scrollTo({top: form.closest('.section').offsetTop - 10, behavior:'smooth'});
@@ -382,7 +389,8 @@ document.getElementById('productForm').addEventListener('submit', async function
         url: form.get('url') || null,
         affiliate_url: form.get('affiliate_url') || null,
         old_price: form.get('old_price') ? Number(form.get('old_price')) : null,
-        current_price: form.get('current_price') ? Number(form.get('current_price')) : null
+        current_price: form.get('current_price') ? Number(form.get('current_price')) : null,
+        image_url: form.get('image_url') || null
     };
 
     const editId = event.target.dataset.editId;
@@ -508,58 +516,42 @@ def generate_offer(payload: dict):
             "description": generated.get("raw", ""),
             "discount": analysis.get("discount"),
             "score": analysis.get("score"),
-
-                        "status": "generated"
+            "status": "generated"
         }
-
         supabase.table("offers").insert(offer_data).execute()
-
     except Exception:
         pass
 
-    return generated
+    return {**generated, "model": GEMINI_MODEL}
+
+
+@app.get("/api/products")
+def products():
+    return (
+        supabase.table("products")
+        .select("*")
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
 
 
 @app.put("/api/products/{product_id}")
 def update_product(product_id: int, product: Product):
     result = (
-        supabase
-        .table("products")
+        supabase.table("products")
         .update(product.model_dump())
         .eq("id", product_id)
         .execute()
     )
-
     if not result.data:
         raise HTTPException(404, "Produto não encontrado.")
-
     return result.data[0]
 
 
 @app.post("/api/products")
 def create_product(product: Product):
-    result = (
-        supabase
-        .table("products")
-        .insert(product.model_dump())
-        .execute()
-    )
-
+    result = supabase.table("products").insert(product.model_dump()).execute()
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
-
     return result.data[0]
-
-
-@app.get("/api/products")
-def get_products():
-    result = (
-        supabase
-        .table("products")
-        .select("*")
-        .order("created_at", desc=True)
-        .execute()
-    )
-
-    return result.data
-            
