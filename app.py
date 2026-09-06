@@ -134,25 +134,46 @@ function calculateOffer(p){
     const savings = oldPrice - currentPrice;
     const discount = (savings / oldPrice) * 100;
 
-    let score = 0;
-    if(discount >= 50) score += 70;
-    else if(discount >= 40) score += 60;
-    else if(discount >= 30) score += 50;
-    else if(discount >= 20) score += 35;
-    else if(discount >= 10) score += 20;
-    else score += 5;
+    // Score transparente do MVP: desconto (60), economia (15),
+    // link de afiliado (10), URL do produto (5), loja (5), categoria (5).
+    let discountPoints = 0;
+    if(discount >= 50) discountPoints = 60;
+    else if(discount >= 40) discountPoints = 50;
+    else if(discount >= 30) discountPoints = 40;
+    else if(discount >= 20) discountPoints = 28;
+    else if(discount >= 10) discountPoints = 15;
+    else discountPoints = 5;
 
-    if(p.affiliate_url) score += 15;
-    if(p.url) score += 5;
-    if(p.store) score += 5;
-    if(p.category) score += 5;
+    let savingsPoints = 0;
+    if(savings >= 200) savingsPoints = 15;
+    else if(savings >= 100) savingsPoints = 12;
+    else if(savings >= 50) savingsPoints = 9;
+    else if(savings >= 20) savingsPoints = 6;
+    else savingsPoints = 2;
 
-    score = Math.min(100, score);
+    const affiliatePoints = p.affiliate_url ? 10 : 0;
+    const urlPoints = p.url ? 5 : 0;
+    const storePoints = p.store ? 5 : 0;
+    const categoryPoints = p.category ? 5 : 0;
+
+    const score = Math.min(
+        100,
+        discountPoints + savingsPoints + affiliatePoints +
+        urlPoints + storePoints + categoryPoints
+    );
 
     return {
         savings: savings,
         discount: discount,
-        score: score
+        score: score,
+        breakdown: {
+            discount: discountPoints,
+            savings: savingsPoints,
+            affiliate: affiliatePoints,
+            url: urlPoints,
+            store: storePoints,
+            category: categoryPoints
+        }
     };
 }
 
@@ -276,6 +297,20 @@ async function loadProducts(){
                         <b>⭐ ${analysis.score}/100</b>
                     </div>
                 </div>
+
+                <details style="margin-top:10px">
+                    <summary style="cursor:pointer;font-size:13px;color:#475467">
+                        🔎 Como chegamos ao score?
+                    </summary>
+                    <div style="margin-top:8px;font-size:12px;color:#475467;line-height:1.7">
+                        Desconto: <b>${analysis.breakdown.discount}/60</b> ·
+                        Economia: <b>${analysis.breakdown.savings}/15</b> ·
+                        Afiliado: <b>${analysis.breakdown.affiliate}/10</b> ·
+                        Link: <b>${analysis.breakdown.url}/5</b> ·
+                        Loja: <b>${analysis.breakdown.store}/5</b> ·
+                        Categoria: <b>${analysis.breakdown.category}/5</b>
+                    </div>
+                </details>
 
                 <button class="offer-btn" onclick="showOffer(${index})">
                     🔥 Gerar oferta
@@ -472,43 +507,4 @@ def generate_offer(payload: dict):
             "title": generated.get("whatsapp", product.get("name"))[:180],
             "description": generated.get("raw", ""),
             "discount": analysis.get("discount"),
-            "score": analysis.get("score"),
-            "status": "generated",
-        }).execute()
-    except Exception:
-        pass
-
-    return {**generated, "model": GEMINI_MODEL}
-
-
-@app.get("/api/products")
-def products():
-    return (
-        supabase.table("products")
-        .select("*")
-        .order("created_at", desc=True)
-        .execute()
-        .data
-    )
-
-
-@app.put("/api/products/{product_id}")
-def update_product(product_id: int, product: Product):
-    result = (
-        supabase.table("products")
-        .update(product.model_dump())
-        .eq("id", product_id)
-        .execute()
-    )
-    if not result.data:
-        raise HTTPException(404, "Produto não encontrado.")
-    return result.data[0]
-
-
-@app.post("/api/products")
-def create_product(product: Product):
-    result = supabase.table("products").insert(product.model_dump()).execute()
-    if not result.data:
-        raise HTTPException(400, "Não foi possível cadastrar o produto.")
-    return result.data[0]
-    
+            "score": anal
