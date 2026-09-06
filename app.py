@@ -275,7 +275,7 @@ async function loadProducts(){
             const store = p.store || '';
             const category = p.category || '';
             const price = p.current_price != null ? money(p.current_price) : '';
-            const image = p.image_url ? '<img class="product-image" src="' + escapeHtml(p.image_url) + '" alt="" loading="lazy" onerror="this.style.display='none'">' : '';
+            const image = p.image_url ? '<img class="product-image" src="' + escapeHtml(p.image_url) + '" alt="" loading="lazy">' : '';
 
             if(!analysis){
                 return `
@@ -812,4 +812,3 @@ def create_product(product: Product):
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
     return result.data[0]
-    
