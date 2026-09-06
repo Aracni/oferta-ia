@@ -1418,19 +1418,27 @@ def mercadolivre_callback(request: Request, code: str | None = None, state: str 
 
 @app.post("/api/mercadolivre/search")
 def mercadolivre_search(payload: dict):
+    """
+    Pesquisa pública de produtos no Mercado Livre.
+
+    Importante:
+    O endpoint /sites/MLB/search é um recurso de catálogo/busca pública.
+    Não enviamos o access_token OAuth do usuário nesta chamada, porque o
+    PolicyAgent pode bloquear um token de usuário em um endpoint público.
+    A conexão OAuth continua sendo usada para recursos protegidos que
+    realmente exigirem autorização.
+    """
     query = (payload.get("query") or "").strip()
-    limit = max(1, min(20, int(payload.get("limit") or 10)))
+    try:
+        limit = max(1, min(20, int(payload.get("limit") or 10)))
+    except (TypeError, ValueError):
+        limit = 10
+
     if not query:
         raise HTTPException(400, "Informe um termo de busca.")
 
-    connection = _get_connection("mercadolivre")
-    access_token = (connection or {}).get("access_token")
-    if not access_token:
-        raise HTTPException(401, "Mercado Livre não está conectado. Autorize a conta primeiro.")
-
     try:
         headers = {
-            "Authorization": f"Bearer {access_token}",
             "User-Agent": "OFERTA-IA/1.0",
             "Accept": "application/json",
         }
@@ -1443,13 +1451,12 @@ def mercadolivre_search(payload: dict):
         )
 
         if r.status_code == 401:
-            raise HTTPException(401, "O token do Mercado Livre expirou. Conecte novamente a conta.")
+            raise HTTPException(502, "O Mercado Livre recusou a pesquisa pública (401).")
         if r.status_code == 403:
-            detail = r.text[:400]
+            detail = r.text[:500]
             raise HTTPException(
-                403,
-                "Mercado Livre bloqueou esta busca para o token/aplicação. "
-                "Verifique as permissões da aplicação e os escopos autorizados. "
+                502,
+                "O Mercado Livre bloqueou a pesquisa pública (403). "
                 f"Detalhe: {detail}"
             )
 
@@ -1462,39 +1469,50 @@ def mercadolivre_search(payload: dict):
             current_price = x.get("price")
             discount_rate = None
 
-            if original_price and current_price and original_price > current_price:
-                discount_rate = round(
-                    ((original_price - current_price) / original_price) * 100, 2
-                )
+            try:
+                if original_price and current_price and float(original_price) > float(current_price):
+                    discount_rate = round(
+                        ((float(original_price) - float(current_price)) / float(original_price)) * 100,
+                        2,
+                    )
+            except (TypeError, ValueError):
+                pass
+
+            seller = x.get("seller") or {}
+            shipping = x.get("shipping") or {}
 
             items.append({
                 "name": x.get("title"),
-                "store": "Mercado Livre",
+                "store": str(seller.get("nickname") or "Mercado Livre"),
                 "url": x.get("permalink"),
                 "current_price": current_price,
                 "old_price": original_price,
                 "discount_rate": discount_rate,
                 "category": x.get("category_id"),
-                "image_url": x.get("thumbnail"),
+                "image_url": x.get("thumbnail") or x.get("thumbnail_id"),
                 "item_id": x.get("id"),
-                "seller_id": x.get("seller", {}).get("id"),
+                "seller_id": seller.get("id"),
                 "condition": x.get("condition"),
-                "sales": x.get("sold_quantity") or 0,
-                "rating": 0,
-                "data_confidence": "media",
+                "sales": x.get("sold_quantity"),
+                "rating": None,
+                "data_confidence": "medium",
+                "free_shipping": bool(shipping.get("free_shipping")),
             })
 
         return {
-            "items": items,
-            "source": "mercadolivre_search",
             "query": query,
             "total": raw.get("paging", {}).get("total", len(items)),
+            "items": items,
+            "source": "mercadolivre_public_search",
+            "authenticated": False,
         }
 
     except HTTPException:
         raise
     except requests.RequestException as exc:
-        raise HTTPException(502, f"Falha ao consultar Mercado Livre: {exc}")
+        raise HTTPException(502, f"Falha de comunicação com o Mercado Livre: {exc}")
+    except Exception as exc:
+        raise HTTPException(502, f"Falha ao pesquisar no Mercado Livre: {exc}")
 
 @app.post("/api/amazon/settings")
 def amazon_settings(payload: dict):
