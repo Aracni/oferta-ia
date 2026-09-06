@@ -150,6 +150,54 @@ nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;wh
 </div>
 
 <div class="section">
+<h2>🛒 Mercado Livre</h2>
+<div class="card">
+<div id="meliStatus" class="muted">Verificando conexão...</div>
+<button type="button" id="meliConnectBtn" style="margin-top:10px;background:#2563eb">🔐 Conectar Mercado Livre</button>
+<button type="button" id="meliSearchBtn" style="margin-top:10px">🔎 Pesquisar produtos</button>
+<div id="meliSearchBox" style="display:none;margin-top:12px">
+<input id="meliQuery" placeholder="Ex.: celular, air fryer, fone bluetooth">
+<input id="meliLimit" type="number" min="1" max="20" value="10" placeholder="Quantidade">
+<button type="button" id="meliSearchAction" style="margin-top:8px;background:#12b76a">🔎 Buscar no Mercado Livre</button>
+<div id="meliResults" style="margin-top:12px"></div>
+</div>
+</div>
+</div>
+
+<div class="section">
+<h2>🎯 Descoberta inteligente de oportunidades</h2>
+<div class="card">
+<p class="muted">O sistema analisa os produtos disponíveis e prioriza oportunidades pelo potencial de oferta.</p>
+<input id="discoveryCategory" placeholder="Categoria (opcional)">
+<input id="discoveryMinDiscount" type="number" min="0" max="100" value="10" placeholder="Desconto mínimo (%)">
+<input id="discoveryLimit" type="number" min="1" max="50" value="10" placeholder="Quantidade de oportunidades">
+<button type="button" id="discoverBtn" style="margin-top:8px;background:#e85d04">🔎 Buscar oportunidades</button>
+<div id="discoveryStatus" class="muted" style="margin-top:10px"></div>
+<div id="opportunityList" style="margin-top:12px"></div>
+</div>
+</div>
+
+<div class="section">
+<h2>📢 Canais de publicação</h2>
+<div class="card">
+<div id="channelOptions" class="channel-grid">
+<label><input type="checkbox" value="whatsapp" checked> 💬 WhatsApp</label>
+<label><input type="checkbox" value="instagram"> 📸 Instagram</label>
+<label><input type="checkbox" value="telegram"> ✈️ Telegram</label>
+</div>
+</div>
+</div>
+
+<div class="section">
+<h2>🛍️ Amazon</h2>
+<div class="card">
+<div id="amazonStatus" class="muted">Nenhuma identificação Amazon salva ainda.</div>
+<input id="amazonTag" placeholder="Sua identificação de associado Amazon">
+<button type="button" id="amazonSaveBtn" style="margin-top:8px;background:#2563eb">💾 Salvar identificação Amazon</button>
+</div>
+</div>
+
+<div class="section">
 <h2>🔥 Análise das ofertas</h2>
 <div id="productList" class="products"></div>
 </div>
@@ -307,8 +355,9 @@ function opportunityHtml(item, index){
         <button class="approve-btn" onclick="approveOpportunity(${index})">✅ Aprovar e publicar</button>
         <button class="reject-btn" onclick="rejectOpportunity(${index})">❌ Descartar</button>
     </div>`;
+}
 
-    async function discoverOpportunities(){
+async function discoverOpportunities(){
     const status = document.getElementById('discoveryStatus');
     const list = document.getElementById('opportunityList');
     const btn = document.getElementById('discoverBtn');
@@ -611,6 +660,7 @@ document.getElementById('meliSearchBtn').addEventListener('click',()=>{
     const box=document.getElementById('meliSearchBox');
     box.style.display=box.style.display==='none'?'block':'none';
 });
+document.getElementById('meliSearchAction').addEventListener('click', searchMercadoLivre);
 document.getElementById('meliQuery').addEventListener('keydown',e=>{if(e.key==='Enter') searchMercadoLivre();});
 async function searchMercadoLivre(){
     const q=document.getElementById('meliQuery').value.trim();
@@ -1132,9 +1182,67 @@ def mercadolivre_oauth():
 def mercadolivre_callback(request: Request, code: str | None = None, state: str | None = None):
     if not code:
         raise HTTPException(400, "Mercado Livre não retornou o código de autorização.")
-    # Cookies são recuperados via Request; esta rota é mantida simples para o MVP.
-    # Se o state/verifier não estiverem disponíveis, o usuário será orientado a tentar novamente.
-    raise HTTPException(400, "A primeira etapa de OAuth foi preparada. Para concluir a conexão, atualizaremos o callback com validação de sessão segura antes do teste final.")
+
+    saved_state = request.cookies.get("meli_oauth_state")
+    verifier = request.cookies.get("meli_code_verifier")
+
+    if not state or not saved_state or state != saved_state:
+        raise HTTPException(400, "Sessão OAuth inválida ou expirada. Tente conectar novamente.")
+    if not verifier:
+        raise HTTPException(400, "Verificador PKCE não encontrado. Tente conectar novamente.")
+
+    client_id, client_secret = _meli_credentials()
+    if not client_id or not client_secret:
+        raise HTTPException(500, "Configure MELI_CLIENT_ID e MELI_CLIENT_SECRET no Render.")
+
+    redirect_uri = "https://oferta-ia.onrender.com/oauth/mercadolivre/callback"
+
+    try:
+        token_response = requests.post(
+            "https://api.mercadolibre.com/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "code_verifier": verifier,
+            },
+            timeout=20,
+        )
+        if not token_response.ok:
+            detail = token_response.text[:500]
+            raise HTTPException(502, f"Mercado Livre recusou a autorização: {detail}")
+
+        token = token_response.json()
+        access_token = token.get("access_token")
+        refresh_token = token.get("refresh_token")
+
+        if not access_token:
+            raise HTTPException(502, "Mercado Livre não retornou access_token.")
+
+        expires_in = int(token.get("expires_in") or 0)
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        ).isoformat() if expires_in else None
+
+        _save_connection("mercadolivre", {
+            "status": "connected",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_at": expires_at,
+            "user_id": str(token.get("user_id") or ""),
+        })
+
+        response = RedirectResponse("/")
+        response.delete_cookie("meli_oauth_state")
+        response.delete_cookie("meli_code_verifier")
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Falha ao concluir conexão com Mercado Livre: {exc}")
 
 @app.post("/api/mercadolivre/search")
 def mercadolivre_search(payload: dict):
@@ -1202,3 +1310,5 @@ def create_product(product: Product):
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
     return result.data[0]
+    
+    
