@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from supabase import create_client
+import requests
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -44,7 +45,8 @@ main{max-width:900px;margin:auto;padding:20px}
 .number{font-size:30px;font-weight:800;margin-top:7px}.label{font-size:13px;color:#667085}
 .section{margin-top:22px}.section h2{font-size:19px;margin:0 0 12px}
 button{border:0;border-radius:12px;padding:13px 16px;background:#111827;color:white;font-weight:700;cursor:pointer}
-button.offer-btn{margin-top:12px;width:100%;background:#e85d04}
+button.buy-btn{display:block;text-align:center;margin-top:14px;background:#111827;color:white;text-decoration:none;padding:12px;border-radius:12px;font-weight:700}
+.offer-btn{margin-top:12px;width:100%;background:#e85d04}
 .form{display:grid;gap:10px}
 input{width:100%;padding:13px;border:1px solid #d7dce5;border-radius:12px;font-size:15px}
 .products{display:grid;gap:10px}
@@ -160,16 +162,15 @@ function scoreClass(score){
     return 'low';
 }
 
-function generateOffer(p, analysis){
+function generateOffer(p, analysis, aiText){
     const store = p.store ? ' na ' + p.store : '';
+    const link = p.affiliate_url || p.url;
     return `
         <div class="offer-box">
-            <strong>🔥 ${p.name}</strong><br>
-            De <s>${money(p.old_price)}</s><br>
-            <strong>Por ${money(p.current_price)}</strong><br>
-            <strong>${analysis.discount.toFixed(2).replace('.', ',')}% OFF</strong>
-            ${store}.<br><br>
-            💰 Você economiza ${money(analysis.savings)}.
+            <div style="white-space:pre-wrap;line-height:1.55">${aiText || ''}</div>
+            <hr style="border:0;border-top:1px solid #ddd;margin:14px 0">
+            <div><strong>💰 Economia:</strong> ${money(analysis.savings)} · <strong>${analysis.discount.toFixed(2).replace('.', ',')}% OFF</strong>${store}</div>
+            ${link ? '<a class="buy-btn" href="' + link + '" target="_blank" rel="noopener">🛒 Ver oferta</a>' : ''}
         </div>
     `;
 }
@@ -248,14 +249,26 @@ async function loadProducts(){
     }
 }
 
-function showOffer(index){
+async function showOffer(index){
     const p = window.currentProducts[index];
     const analysis = calculateOffer(p);
-
     if(!analysis) return;
 
-    document.getElementById('offer-' + index).innerHTML =
-        generateOffer(p, analysis);
+    const box = document.getElementById('offer-' + index);
+    box.innerHTML = '<div class="offer-box">🤖 Criando oferta com IA...</div>';
+
+    try{
+        const response = await fetch('/api/generate-offer', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({product: p, analysis: analysis})
+        });
+        const data = await response.json();
+        if(!response.ok){ throw new Error(data.detail || 'Erro ao gerar oferta'); }
+        box.innerHTML = generateOffer(p, analysis, data.text);
+    }catch(error){
+        box.innerHTML = '<div class="offer-box">⚠️ ' + (error.message || 'Não foi possível gerar a oferta.') + '</div>';
+    }
 }
 
 document.getElementById('productForm').addEventListener('submit', async function(event){
@@ -295,6 +308,66 @@ loadProducts();
 </html>"""
 
 
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna")
+
+
+def generate_ai_offer(product: dict, analysis: dict) -> str:
+    if not OPENAI_API_KEY:
+        raise HTTPException(500, "OPENAI_API_KEY não configurada no Render.")
+
+    prompt = f"""Você é um especialista em copywriting para ofertas de e-commerce no Brasil.
+Crie uma oferta curta, convincente e pronta para WhatsApp/Telegram/Instagram.
+Use SOMENTE os dados fornecidos abaixo. Não invente características, avaliações, frete, garantia, estoque, prazo ou benefícios que não estejam nos dados.
+Não diga que o produto é o melhor, mais barato ou imperdível sem evidência.
+Use português do Brasil.
+Estrutura: título chamativo, preço anterior e atual, desconto, economia e uma chamada para ação.
+
+Produto: {product.get('name')}
+Loja: {product.get('store') or 'não informada'}
+Categoria: {product.get('category') or 'não informada'}
+Preço anterior: R$ {float(product.get('old_price') or 0):.2f}
+Preço atual: R$ {float(product.get('current_price') or 0):.2f}
+Desconto calculado: {analysis.get('discount', 0):.2f}%
+Economia calculada: R$ {analysis.get('savings', 0):.2f}
+"""
+
+    response = requests.post(
+        "https://api.openai.com/v1/responses",
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": OPENAI_MODEL,
+            "input": prompt,
+            "max_output_tokens": 300,
+        },
+        timeout=45,
+    )
+
+    if not response.ok:
+        try:
+            detail = response.json().get("error", {}).get("message", response.text)
+        except Exception:
+            detail = response.text
+        raise HTTPException(502, f"OpenAI: {detail}")
+
+    data = response.json()
+    if data.get("output_text"):
+        return data["output_text"].strip()
+
+    parts = []
+    for item in data.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") == "output_text" and content.get("text"):
+                parts.append(content["text"])
+    text = "\n".join(parts).strip()
+    if not text:
+        raise HTTPException(502, "A IA respondeu sem texto.")
+    return text
+
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     return HTML
@@ -303,6 +376,30 @@ def home():
 @app.get("/api/health")
 def health():
     return {"status": "ok", "app": "OFERTA IA"}
+
+
+@app.post("/api/generate-offer")
+def generate_offer(payload: dict):
+    product = payload.get("product") or {}
+    analysis = payload.get("analysis") or {}
+    if not product.get("name"):
+        raise HTTPException(400, "Produto inválido.")
+    text = generate_ai_offer(product, analysis)
+
+    # Guarda uma cópia da oferta gerada no Supabase, sem bloquear a exibição caso o salvamento falhe.
+    try:
+        supabase.table("offers").insert({
+            "product_id": product.get("id"),
+            "title": text.splitlines()[0][:180] if text else product.get("name"),
+            "description": text,
+            "discount": analysis.get("discount"),
+            "score": analysis.get("score"),
+            "status": "generated",
+        }).execute()
+    except Exception:
+        pass
+
+    return {"text": text, "model": OPENAI_MODEL}
 
 
 @app.get("/api/products")
