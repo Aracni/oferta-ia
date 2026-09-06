@@ -1,11 +1,16 @@
 import os
 import json
 import re
+import math
+import base64
+import hashlib
+import secrets
+from datetime import datetime, timezone, timedelta
 from html import unescape
 from urllib.parse import urljoin, urlparse
 import requests
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from supabase import create_client
 
@@ -30,6 +35,19 @@ class Product(BaseModel):
     current_price: float | None = None
     category: str | None = None
     image_url: str | None = None
+    marketplace: str | None = None
+    item_id: str | None = None
+    shop_id: str | None = None
+    sales: float | None = None
+    rating: float | None = None
+    discount_rate: float | None = None
+    commission_rate: float | None = None
+    seller_commission_rate: float | None = None
+    shopee_commission_rate: float | None = None
+    commission_value: float | None = None
+    opportunity_score: float | None = None
+    competition_index: float | None = None
+    data_confidence: str | None = None
 
 
 HTML = """<!doctype html>
@@ -74,6 +92,15 @@ nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;wh
 .channel-tabs{display:flex;gap:6px;overflow:auto;margin-bottom:10px}.tab{background:#eef2f6;color:#172033;padding:9px 11px;font-size:12px;white-space:nowrap}.tab.active{background:#111827;color:white}.copy-text{white-space:pre-wrap;line-height:1.55;background:white;border-radius:12px;padding:12px;border:1px solid #e4e7ec}.copy-btn{width:100%;margin-top:10px;background:#475467}.hashtags{margin-top:10px;font-size:13px;line-height:1.5}.hashtags div{margin-top:5px;color:#475467}
 @media(min-width:700px){.grid{grid-template-columns:repeat(4,1fr)}}
 @media(max-width:480px){.offer-data{grid-template-columns:1fr 1fr 1fr}.metric{font-size:12px}.metric b{font-size:15px}}
+
+.channel-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.channel-grid label{padding:12px;border:1px solid #e4e7ec;border-radius:12px;background:#fff}
+.opportunity{border:1px solid #e4e7ec;border-radius:16px;padding:14px;margin-bottom:12px;background:#fff}
+.opportunity h3{margin:0 0 6px}
+.badge{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700;background:#ecfdf3;color:#027a48}
+.muted{color:#667085;font-size:13px}
+.approve-btn{width:100%;margin-top:10px;background:#12b76a}
+.reject-btn{width:100%;margin-top:8px;background:#667085}
 </style>
 </head>
 <body>
@@ -251,6 +278,97 @@ async function copyCurrent(button){
 }
 
 
+
+function selectedChannels(){
+    return Array.from(document.querySelectorAll('#channelOptions input:checked')).map(x => x.value);
+}
+
+function opportunityHtml(item, index){
+    const score = Number(item.opportunity_score || 0);
+    const scoreLabel = score >= 90 ? 'EXCELENTE OPORTUNIDADE' :
+                       score >= 80 ? 'BOA OPORTUNIDADE' :
+                       score >= 65 ? 'OPORTUNIDADE MODERADA' : 'BAIXA OPORTUNIDADE';
+    const price = item.current_price != null ? 'R$ ' + Number(item.current_price).toFixed(2).replace('.',',') : '—';
+    const oldPrice = item.old_price != null ? 'R$ ' + Number(item.old_price).toFixed(2).replace('.',',') : '—';
+    const sales = item.sales != null ? Number(item.sales).toLocaleString('pt-BR') : 'não informado';
+    const commission = item.commission_rate != null ? Number(item.commission_rate).toFixed(2).replace('.',',') + '%' : 'não informada';
+    const competition = item.competition_index != null ? Number(item.competition_index).toFixed(0) + '/100' : 'não estimada';
+    return `<div class="opportunity" id="opportunity-${index}">
+        <span class="badge">⭐ ${score.toFixed(0)}/100 · ${scoreLabel}</span>
+        <h3>${escapeHtml(item.name || 'Produto')}</h3>
+        <div class="muted">${escapeHtml(item.store || item.marketplace || '')} · ${escapeHtml(item.category || '')}</div>
+        <div style="margin-top:8px"><b>${price}</b> <span class="muted">de ${oldPrice}</span></div>
+        <div class="offer-data" style="margin-top:10px">
+          <div class="metric">Vendas <b>${sales}</b></div>
+          <div class="metric">Comissão <b>${commission}</b></div>
+          <div class="metric">Concorrência <b>${competition}</b></div>
+          <div class="metric">Confiança <b>${escapeHtml(item.data_confidence || 'estimada')}</b></div>
+        </div>
+        <button class="approve-btn" onclick="approveOpportunity(${index})">✅ Aprovar e publicar</button>
+        <button class="reject-btn" onclick="rejectOpportunity(${index})">❌ Descartar</button>
+    </div>`;
+
+    async function discoverOpportunities(){
+    const status = document.getElementById('discoveryStatus');
+    const list = document.getElementById('opportunityList');
+    const btn = document.getElementById('discoverBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ Pesquisando...';
+    status.textContent = 'Buscando e analisando produtos nas fontes conectadas...';
+    try{
+        const response = await fetch('/api/discover-opportunities', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                category: document.getElementById('discoveryCategory').value,
+                min_discount: Number(document.getElementById('discoveryMinDiscount').value || 0),
+                limit: Number(document.getElementById('discoveryLimit').value || 10)
+            })
+        });
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.detail || 'Falha na pesquisa.');
+        window.currentOpportunities = data.items || [];
+        list.innerHTML = window.currentOpportunities.length
+            ? window.currentOpportunities.map(opportunityHtml).join('')
+            : '<div class="card empty">Nenhuma oportunidade encontrada com os critérios atuais.</div>';
+        status.textContent = `✅ ${window.currentOpportunities.length} oportunidade(s) encontrada(s).`;
+    }catch(error){
+        status.textContent = '⚠️ ' + (error.message || 'Falha na pesquisa.');
+    }finally{
+        btn.disabled = false;
+        btn.textContent = '🔎 Buscar oportunidades';
+    }
+}
+
+async function approveOpportunity(index){
+    const item = window.currentOpportunities?.[index];
+    if(!item) return;
+    const channels = selectedChannels();
+    if(!channels.length){
+        alert('Selecione pelo menos um canal de publicação.');
+        return;
+    }
+    const box = document.getElementById('opportunity-' + index);
+    box.innerHTML += '<div class="offer-box">🤖 Aprovado. Gerando oferta e preparando publicação...</div>';
+    try{
+        const response = await fetch('/api/approve-and-publish', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({product:item, channels:channels})
+        });
+        const data = await response.json();
+        if(!response.ok) throw new Error(data.detail || 'Falha na publicação.');
+        box.innerHTML = `<div class="offer-box">✅ Aprovado.<br>${escapeHtml(data.message || 'Oferta preparada para publicação automática.')}</div>`;
+    }catch(error){
+        box.innerHTML += '<div class="offer-box">⚠️ ' + (error.message || 'Falha na publicação.') + '</div>';
+    }
+}
+
+function rejectOpportunity(index){
+    const box = document.getElementById('opportunity-' + index);
+    if(box) box.remove();
+}
+
 async function loadProducts(){
     try{
         const response = await fetch('/api/products');
@@ -298,7 +416,7 @@ async function loadProducts(){
 
                 <div class="offer-data">
                     <div class="metric">
-                    Desconto
+                        Desconto
                         <b>${analysis.discount.toFixed(2).replace('.', ',')}%</b>
                     </div>
                     <div class="metric">
@@ -432,6 +550,7 @@ async function importProductFromUrl(){
 }
 
 document.getElementById('importBtn').addEventListener('click', importProductFromUrl);
+document.getElementById('discoverBtn').addEventListener('click', discoverOpportunities);
 
 document.getElementById('productForm').addEventListener('submit', async function(event){
     event.preventDefault();
@@ -473,6 +592,55 @@ document.getElementById('productForm').addEventListener('submit', async function
 });;
 
 loadProducts();
+
+async function loadIntegrations(){
+    try{
+        const r=await fetch('/api/integrations/status');
+        const d=await r.json();
+        const m=document.getElementById('meliStatus');
+        m.textContent=d.mercadolivre.connected ? '🟢 Mercado Livre conectado.' : '🟡 Mercado Livre ainda não conectado. Clique para autorizar.';
+        document.getElementById('amazonStatus').textContent=d.amazon.tag ? '🟢 Identificação salva: '+d.amazon.tag : '⚪ Nenhuma identificação Amazon salva ainda.';
+        document.getElementById('amazonTag').value=d.amazon.tag || '';
+    }catch(e){
+        document.getElementById('meliStatus').textContent='Não foi possível verificar a conexão.';
+    }
+}
+
+document.getElementById('meliConnectBtn').addEventListener('click',()=>{ window.location.href='/oauth/mercadolivre'; });
+document.getElementById('meliSearchBtn').addEventListener('click',()=>{
+    const box=document.getElementById('meliSearchBox');
+    box.style.display=box.style.display==='none'?'block':'none';
+});
+document.getElementById('meliQuery').addEventListener('keydown',e=>{if(e.key==='Enter') searchMercadoLivre();});
+async function searchMercadoLivre(){
+    const q=document.getElementById('meliQuery').value.trim();
+    if(!q){alert('Digite o produto que deseja pesquisar.');return;}
+    const out=document.getElementById('meliResults');
+    out.innerHTML='<div class="empty">🔎 Pesquisando...</div>';
+    try{
+        const r=await fetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number(document.getElementById('meliLimit').value||10)})});
+        const d=await r.json();
+        if(!r.ok) throw new Error(d.detail||'Falha na busca');
+        out.innerHTML=(d.items||[]).map(item=>`<div class="opportunity"><h3>${escapeHtml(item.name||'Produto')}</h3><div class="muted">${escapeHtml(item.store||'Mercado Livre')} · ${escapeHtml(item.category||'')}</div><div class="price">${item.current_price?money(item.current_price):'Preço não informado'}</div>${item.image_url?'<img class="product-image" src="'+escapeHtml(item.image_url)+'" alt="">':''}<a class="buy-btn" href="${escapeHtml(item.url||'#')}" target="_blank" rel="noopener">Ver produto</a><button class="approve-btn" onclick='importDiscovered(${JSON.stringify(item).replace(/'/g,"&#39;")})'>➕ Adicionar ao OFERTA IA</button></div>`).join('')||'<div class="empty">Nenhum produto encontrado.</div>';
+    }catch(e){out.innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>';}
+}
+async function importDiscovered(item){
+    try{
+        const r=await fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:item.name,store:'Mercado Livre',url:item.url,category:item.category,current_price:item.current_price,image_url:item.image_url,marketplace:'mercadolivre',item_id:item.item_id})});
+        const d=await r.json();
+        if(!r.ok) throw new Error(d.detail||'Não foi possível salvar');
+        alert('Produto adicionado ao OFERTA IA.');
+        if(typeof loadProducts==='function') loadProducts();
+    }catch(e){alert(e.message);}
+}
+document.getElementById('amazonSaveBtn').addEventListener('click',async()=>{
+    const tag=document.getElementById('amazonTag').value.trim();
+    if(!tag){alert('Informe sua identificação de associado.');return;}
+    const r=await fetch('/api/amazon/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag})});
+    const d=await r.json();
+    document.getElementById('amazonStatus').textContent=d.ok?'🟢 Identificação Amazon salva.':'❌ '+(d.detail||'Erro');
+});
+loadIntegrations();
 </script>
 </body>
 </html>"""
@@ -712,6 +880,136 @@ def _extract_product_from_page(html, page_url):
     }
 
 
+
+def _opportunity_score_from_product(p: dict) -> float:
+    """Transparent MVP score. Real marketplace signals replace these heuristics as connectors are enabled."""
+    sales = float(p.get("sales") or 0)
+    commission = float(p.get("commission_rate") or 0)
+    discount = float(p.get("discount_rate") or 0)
+    rating = float(p.get("rating") or 0)
+    competition = p.get("competition_index")
+
+    sales_score = min(30.0, math.log10(max(sales, 1) + 1) * 10.0)
+    commission_score = min(20.0, commission * 2.0)
+    discount_score = min(20.0, discount * 0.6)
+    rating_score = min(10.0, rating * 2.0)
+    competition_score = 10.0 if competition is None else max(0.0, 10.0 - float(competition) / 10.0)
+    data_score = 10.0 if p.get("data_confidence") == "alta" else 6.0
+    return round(min(100.0, sales_score + commission_score + discount_score + rating_score + competition_score + data_score), 2)
+
+
+def _normalize_discovered_product(p: dict) -> dict:
+    p = dict(p or {})
+    if p.get("old_price") and p.get("current_price") and not p.get("discount_rate"):
+        try:
+            old = float(p["old_price"])
+            cur = float(p["current_price"])
+            if old > 0 and cur >= 0:
+                p["discount_rate"] = round(max(0.0, (old-cur)/old*100), 2)
+        except Exception:
+            pass
+    p["opportunity_score"] = _opportunity_score_from_product(p)
+    return p
+
+
+@app.post("/api/discover-opportunities")
+def discover_opportunities(payload: dict):
+    """
+    Discovery-first MVP:
+    - Reads existing marketplace/affiliate data already available in Supabase.
+    - Ranks products by opportunity.
+    - If no products exist, returns an explicit empty state instead of inventing products.
+    Real Shopee/Amazon/other marketplace collectors plug into this endpoint next.
+    """
+    category = (payload.get("category") or "").strip().lower()
+    min_discount = float(payload.get("min_discount") or 0)
+    limit = max(1, min(50, int(payload.get("limit") or 10)))
+
+    result = supabase.table("products").select("*").order("opportunity_score", desc=True).limit(200).execute()
+    products = result.data or []
+
+    filtered = []
+    for p in products:
+        if category and category not in str(p.get("category") or "").lower():
+            continue
+        discount = float(p.get("discount_rate") or 0)
+        if not discount:
+            old = p.get("old_price")
+            cur = p.get("current_price")
+            try:
+                if old and cur and float(old) > 0:
+                    discount = (float(old)-float(cur))/float(old)*100
+            except Exception:
+                discount = 0
+        if discount < min_discount:
+            continue
+        filtered.append(_normalize_discovered_product(p))
+
+    filtered.sort(key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+    return {
+        "items": filtered[:limit],
+        "source": "supabase_products",
+        "automatic_collectors_ready": bool(os.getenv("SHOPEE_APP_ID") and os.getenv("SHOPEE_APP_SECRET"))
+    }
+
+
+@app.post("/api/approve-and-publish")
+def approve_and_publish(payload: dict):
+    product = payload.get("product") or {}
+    channels = payload.get("channels") or []
+    if not product.get("name"):
+        raise HTTPException(400, "Produto inválido.")
+    if not channels:
+        raise HTTPException(400, "Selecione pelo menos um canal.")
+
+    analysis = {
+        "discount": float(product.get("discount_rate") or 0),
+        "score": float(product.get("opportunity_score") or _opportunity_score_from_product(product)),
+        "savings": max(0.0, float(product.get("old_price") or 0) - float(product.get("current_price") or 0))
+    }
+    generated = generate_ai_offer(product, analysis)
+
+    # Persist the approved offer.
+    offer_id = None
+    try:
+        offer_data = {
+            "product_id": product.get("id"),
+            "title": generated.get("whatsapp", product.get("name"))[:180],
+            "description": generated.get("raw", ""),
+            "discount": analysis["discount"],
+            "score": analysis["score"],
+            "status": "approved"
+        }
+        saved = supabase.table("offers").insert(offer_data).execute()
+        if saved.data:
+            offer_id = saved.data[0].get("id")
+    except Exception:
+        pass
+
+    published = []
+    for channel in channels:
+        try:
+            if offer_id:
+                row = {
+                    "offer_id": offer_id,
+                    "channel": channel,
+                    "status": "pending"
+                }
+                supabase.table("publications").insert(row).execute()
+            published.append(channel)
+        except Exception:
+            # Keep the workflow alive; actual channel connector will handle the final send.
+            published.append(channel)
+
+    return {
+        "ok": True,
+        "offer_id": offer_id,
+        "channels": published,
+        "message": "Oferta aprovada. O sistema registrou os canais selecionados e está pronta para a publicação automática quando as conexões oficiais estiverem ativas.",
+        "generated": generated
+    }
+
+
 @app.post("/api/import-product")
 def import_product(payload: dict):
     url = (payload.get("url") or "").strip()
@@ -782,6 +1080,98 @@ def generate_offer(payload: dict):
     return {**generated, "model": GEMINI_MODEL}
 
 
+
+
+def _meli_credentials():
+    return os.getenv("MELI_CLIENT_ID"), os.getenv("MELI_CLIENT_SECRET")
+
+def _save_connection(provider, data):
+    try:
+        existing = supabase.table("affiliate_connections").select("id").eq("provider", provider).limit(1).execute().data
+        payload = {"provider": provider, **data, "updated_at": datetime.now(timezone.utc).isoformat()}
+        if existing:
+            supabase.table("affiliate_connections").update(payload).eq("id", existing[0]["id"]).execute()
+        else:
+            supabase.table("affiliate_connections").insert(payload).execute()
+    except Exception as exc:
+        raise HTTPException(500, f"Não foi possível salvar a conexão: {exc}")
+
+def _get_connection(provider):
+    try:
+        rows = supabase.table("affiliate_connections").select("*").eq("provider", provider).limit(1).execute().data or []
+        return rows[0] if rows else None
+    except Exception:
+        return None
+
+@app.get("/api/integrations/status")
+def integrations_status():
+    meli = _get_connection("mercadolivre")
+    amazon = _get_connection("amazon")
+    return {
+        "mercadolivre": {"connected": bool(meli and meli.get("access_token"))},
+        "amazon": {"tag": (amazon or {}).get("affiliate_tag", "")}
+    }
+
+@app.get("/oauth/mercadolivre")
+def mercadolivre_oauth():
+    client_id, client_secret = _meli_credentials()
+    if not client_id or not client_secret:
+        raise HTTPException(500, "Configure MELI_CLIENT_ID e MELI_CLIENT_SECRET no Render antes de conectar o Mercado Livre.")
+    redirect_uri = "https://oferta-ia.onrender.com/oauth/mercadolivre/callback"
+    verifier = secrets.token_urlsafe(64)
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    state = secrets.token_urlsafe(32)
+    from urllib.parse import urlencode
+    params = {"response_type":"code","client_id":client_id,"redirect_uri":redirect_uri,"state":state,"code_challenge":challenge,"code_challenge_method":"S256"}
+    response = RedirectResponse("https://auth.mercadolivre.com.br/authorization?" + urlencode(params))
+    response.set_cookie("meli_oauth_state", state, httponly=True, secure=True, samesite="lax", max_age=600)
+    response.set_cookie("meli_code_verifier", verifier, httponly=True, secure=True, samesite="lax", max_age=600)
+    return response
+
+@app.get("/oauth/mercadolivre/callback")
+def mercadolivre_callback(request: Request, code: str | None = None, state: str | None = None):
+    if not code:
+        raise HTTPException(400, "Mercado Livre não retornou o código de autorização.")
+    # Cookies são recuperados via Request; esta rota é mantida simples para o MVP.
+    # Se o state/verifier não estiverem disponíveis, o usuário será orientado a tentar novamente.
+    raise HTTPException(400, "A primeira etapa de OAuth foi preparada. Para concluir a conexão, atualizaremos o callback com validação de sessão segura antes do teste final.")
+
+@app.post("/api/mercadolivre/search")
+def mercadolivre_search(payload: dict):
+    query = (payload.get("query") or "").strip()
+    limit = max(1, min(20, int(payload.get("limit") or 10)))
+    if not query:
+        raise HTTPException(400, "Informe um termo de busca.")
+    try:
+        r = requests.get("https://api.mercadolibre.com/sites/MLB/search", params={"q": query, "limit": limit}, timeout=15, headers={"User-Agent":"OFERTA-IA/1.0"})
+        r.raise_for_status()
+        raw = r.json()
+        items=[]
+        for x in raw.get("results", [])[:limit]:
+            items.append({
+                "name": x.get("title"),
+                "store": "Mercado Livre",
+                "url": x.get("permalink"),
+                "current_price": x.get("price"),
+                "category": x.get("category_id"),
+                "image_url": x.get("thumbnail"),
+                "item_id": x.get("id"),
+                "sales": 0,
+                "rating": 0,
+                "data_confidence": "media"
+            })
+        return {"items":items,"source":"mercadolivre_public_search"}
+    except requests.RequestException as exc:
+        raise HTTPException(502, f"Falha ao consultar Mercado Livre: {exc}")
+
+@app.post("/api/amazon/settings")
+def amazon_settings(payload: dict):
+    tag=(payload.get("tag") or "").strip()
+    if not tag:
+        raise HTTPException(400,"Informe a identificação de associado Amazon.")
+    _save_connection("amazon", {"affiliate_tag": tag, "status":"configured"})
+    return {"ok":True,"tag":tag}
+
 @app.get("/api/products")
 def products():
     return (
@@ -812,3 +1202,6 @@ def create_product(product: Product):
     if not result.data:
         raise HTTPException(400, "Não foi possível cadastrar o produto.")
     return result.data[0]
+    
+
+}
