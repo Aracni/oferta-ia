@@ -508,4 +508,4 @@ def generate_offer(payload: dict):
             "description": generated.get("raw", ""),
             "discount": analysis.get("discount"),
             "score": analysis.get("score"),
-        
+            
