@@ -154,7 +154,9 @@ nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;wh
 <div class="card">
 <div id="meliStatus" class="muted">Verificando conexão...</div>
 <button type="button" id="meliConnectBtn" style="margin-top:10px;background:#2563eb">🔐 Conectar Mercado Livre</button>
+<button type="button" id="meliDiagnosticBtn" style="margin-top:10px;background:#475467">🩺 Diagnosticar Mercado Livre</button>
 <button type="button" id="meliSearchBtn" style="margin-top:10px">🔎 Pesquisar produtos</button>
+<div id="meliDiagnostic" class="muted" style="margin-top:12px;line-height:1.55"></div>
 <div id="meliSearchBox" style="display:none;margin-top:12px">
 <input id="meliQuery" placeholder="Ex.: celular, air fryer, fone bluetooth">
 <input id="meliLimit" type="number" min="1" max="20" value="10" placeholder="Quantidade">
@@ -659,6 +661,58 @@ async function loadIntegrations(){
     }
 }
 
+async function diagnoseMercadoLivre(){
+    const out = document.getElementById('meliDiagnostic');
+    const btn = document.getElementById('meliDiagnosticBtn');
+    if(!out) return;
+
+    if(btn){
+        btn.disabled = true;
+        btn.textContent = '🩺 Diagnosticando...';
+    }
+    out.innerHTML = '🔄 Consultando o token salvo e a API do Mercado Livre...';
+
+    try{
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15000);
+        let r;
+        try{
+            r = await fetch('/api/mercadolivre/diagnostico', {
+                method:'GET',
+                cache:'no-store',
+                signal:controller.signal
+            });
+        }finally{
+            clearTimeout(timer);
+        }
+
+        const d = await r.json().catch(() => ({}));
+        if(!r.ok){
+            throw new Error(d.detail || 'Falha no diagnóstico.');
+        }
+
+        const esc = window.escapeHtml || function(v){
+            return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        };
+
+        const rows = d.tests || [];
+        out.innerHTML = '<div style="margin-bottom:8px"><strong>Resultado do diagnóstico</strong></div>' +
+            rows.map(t => {
+                const icon = t.ok ? '✅' : '❌';
+                return '<div style="margin-top:6px">' + icon + ' <strong>' + esc(t.name) + '</strong>: HTTP ' + esc(t.http_status ?? '—') + '<br><span class="muted">' + esc(t.message || '') + '</span></div>';
+            }).join('') +
+            (d.summary ? '<div style="margin-top:10px"><strong>Resumo:</strong> ' + esc(d.summary) + '</div>' : '') +
+            (d.app ? '<div style="margin-top:10px"><strong>Aplicação:</strong> ' + esc(d.app.certification_status || '—') + ' · ativa=' + esc(d.app.active) + ' · sandbox=' + esc(d.app.sandbox_mode) + '</div>' : '');
+    }catch(e){
+        out.innerHTML = '⚠️ ' + (e && e.name === 'AbortError' ? 'O diagnóstico demorou demais.' : (e.message || 'Falha no diagnóstico.'));
+    }finally{
+        if(btn){
+            btn.disabled = false;
+            btn.textContent = '🩺 Diagnosticar Mercado Livre';
+        }
+    }
+}
+
 async function searchMercadoLivre(){
     const queryEl = document.getElementById('meliQuery');
     const limitEl = document.getElementById('meliLimit');
@@ -793,6 +847,8 @@ document.addEventListener('DOMContentLoaded', function(){
         bindClick('meliConnectBtn', function(){
             window.location.href = '/oauth/mercadolivre';
         });
+
+        bindClick('meliDiagnosticBtn', diagnoseMercadoLivre);
 
         bindClick('meliSearchBtn', function(){
             const box = document.getElementById('meliSearchBox');
@@ -1415,6 +1471,140 @@ def mercadolivre_callback(request: Request, code: str | None = None, state: str 
         raise
     except Exception as exc:
         raise HTTPException(502, f"Falha ao concluir conexão com Mercado Livre: {exc}")
+
+@app.get("/api/mercadolivre/diagnostico")
+def mercadolivre_diagnostico():
+    """Diagnóstico seguro da autorização do Mercado Livre.
+
+    Nunca devolve access_token, refresh_token ou client_secret ao navegador.
+    """
+    connection = _get_connection("mercadolivre")
+    if not connection:
+        raise HTTPException(400, "Nenhuma conexão do Mercado Livre foi encontrada no Supabase.")
+
+    access_token = connection.get("access_token")
+    if not access_token:
+        raise HTTPException(400, "A conexão existe, mas não há access_token salvo.")
+
+    app_id = os.getenv("MELI_CLIENT_ID") or "2432620888529017"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "User-Agent": "OFERTA-IA/1.0",
+    }
+
+    tests = []
+    app_info = {}
+
+    def safe_json(response):
+        try:
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    # 1) Testa o token com o endpoint oficial de usuário.
+    try:
+        r = requests.get(
+            "https://api.mercadolibre.com/users/me",
+            headers=headers,
+            timeout=15,
+        )
+        data = safe_json(r)
+        tests.append({
+            "name": "Token / users/me",
+            "ok": r.ok,
+            "http_status": r.status_code,
+            "message": (
+                f"Usuário autorizado: {data.get('nickname') or data.get('id') or 'sim'}"
+                if r.ok else
+                f"{data.get('message') or data.get('error') or r.text[:300]}"
+            ),
+        })
+    except requests.RequestException as exc:
+        tests.append({
+            "name": "Token / users/me",
+            "ok": False,
+            "http_status": None,
+            "message": f"Falha de comunicação: {exc}",
+        })
+
+    # 2) Consulta os dados da aplicação.
+    try:
+        r = requests.get(
+            f"https://api.mercadolibre.com/applications/{app_id}",
+            headers=headers,
+            timeout=15,
+        )
+        data = safe_json(r)
+        app_info = {
+            "active": data.get("active"),
+            "sandbox_mode": data.get("sandbox_mode"),
+            "certification_status": data.get("certification_status"),
+        }
+        scopes = data.get("scopes")
+        if isinstance(scopes, list):
+            app_info["scopes"] = [str(x) for x in scopes[:20]]
+        tests.append({
+            "name": "Aplicação / applications/{APP_ID}",
+            "ok": r.ok,
+            "http_status": r.status_code,
+            "message": (
+                "Dados da aplicação consultados."
+                if r.ok else
+                f"{data.get('message') or data.get('error') or r.text[:300]}"
+            ),
+        })
+    except requests.RequestException as exc:
+        tests.append({
+            "name": "Aplicação / applications/{APP_ID}",
+            "ok": False,
+            "http_status": None,
+            "message": f"Falha de comunicação: {exc}",
+        })
+
+    # 3) Consulta os grants, quando permitido.
+    try:
+        r = requests.get(
+            f"https://api.mercadolibre.com/applications/{app_id}/grants",
+            headers=headers,
+            timeout=15,
+        )
+        data = safe_json(r)
+        if r.ok:
+            grants = data.get("grants") if isinstance(data.get("grants"), list) else data.get("results")
+            count = len(grants) if isinstance(grants, list) else None
+            msg = f"Grants consultados{': ' + str(count) + ' registro(s)' if count is not None else '.'}"
+        else:
+            msg = data.get("message") or data.get("error") or r.text[:300]
+        tests.append({
+            "name": "Grants / applications/{APP_ID}/grants",
+            "ok": r.ok,
+            "http_status": r.status_code,
+            "message": msg,
+        })
+    except requests.RequestException as exc:
+        tests.append({
+            "name": "Grants / applications/{APP_ID}/grants",
+            "ok": False,
+            "http_status": None,
+            "message": f"Falha de comunicação: {exc}",
+        })
+
+    ok_count = sum(1 for x in tests if x.get("ok"))
+    if tests and ok_count == len(tests):
+        summary = "A autorização e a aplicação responderam normalmente nos testes realizados."
+    elif tests and tests[0].get("ok"):
+        summary = "O token está válido para users/me, mas pelo menos uma consulta adicional foi recusada."
+    else:
+        summary = "O token não foi aceito em users/me; isso aponta para autorização/token antes de qualquer busca de produto."
+
+    return {
+        "tests": tests,
+        "app": app_info,
+        "token_saved": True,
+        "summary": summary,
+    }
 
 @app.post("/api/mercadolivre/search")
 def mercadolivre_search(payload: dict):
