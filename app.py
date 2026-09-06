@@ -441,9 +441,63 @@ async function loadProducts(){
 
             const store = p.store || '';
             const category = p.category || '';
-            const price = p.current_price != null ? money(p.current_price) : ''
+            const price = p.current_price != null ? money(p.current_price) : '';
+            const image = p.image_url ? '<img class="product-image" src="' + escapeHtml(p.image_url) + '" alt="" loading="lazy">' : '';
 
-                            <div id="offer-${index}"></div>
+            if(!analysis){
+                return `
+                <div class="product low">
+                    ${image}
+                    <strong>${escapeHtml(p.name || '')}</strong>
+                    <div>${store}${category ? ' · ' + category : ''}</div>
+                    ${price ? '<div class="price">' + price + '</div>' : ''}
+                    <div class="offer-box">⚠️ Preços insuficientes para calcular uma oferta.</div>
+                </div>`;
+            }
+
+            return `
+            <div class="product ${scoreClass(analysis.score)}" id="product-${index}">
+                ${image}
+                <strong>${escapeHtml(p.name || '')}</strong>
+                <div>${store}${category ? ' · ' + category : ''}</div>
+                <div class="old-price">${money(p.old_price)}</div>
+                <div class="price">${money(p.current_price)}</div>
+
+                <div class="offer-data">
+                    <div class="metric">
+                        Desconto
+                        <b>${analysis.discount.toFixed(2).replace('.', ',')}%</b>
+                    </div>
+                    <div class="metric">
+                        Economia
+                        <b>${money(analysis.savings)}</b>
+                    </div>
+                    <div class="metric score">
+                        Score
+                        <b>⭐ ${analysis.score}/100</b>
+                    </div>
+                </div>
+
+                <details style="margin-top:10px">
+                    <summary style="cursor:pointer;font-size:13px;color:#475467">
+                        🔎 Como chegamos ao score?
+                    </summary>
+                    <div style="margin-top:8px;font-size:12px;color:#475467;line-height:1.7">
+                        Desconto: <b>${analysis.breakdown.discount}/60</b> ·
+                        Economia: <b>${analysis.breakdown.savings}/15</b> ·
+                        Afiliado: <b>${analysis.breakdown.affiliate}/10</b> ·
+                        Link: <b>${analysis.breakdown.url}/5</b> ·
+                        Loja: <b>${analysis.breakdown.store}/5</b> ·
+                        Categoria: <b>${analysis.breakdown.category}/5</b>
+                    </div>
+                </details>
+
+                <button class="offer-btn" onclick="showOffer(${index})">
+                    🔥 Gerar oferta
+                </button>
+                <button style="margin-top:8px;width:100%;background:#475467" onclick="editProduct(${index})">✏️ Editar produto</button>
+
+                <div id="offer-${index}"></div>
             </div>`;
         }).join('');
 
@@ -544,99 +598,271 @@ async function importProductFromUrl(){
     }
 }
 
-document.getElementById('importBtn').addEventListener('click', importProductFromUrl);
-document.getElementById('discoverBtn').addEventListener('click', discoverOpportunities);
+/* Inicialização segura da interface.
+   Todos os eventos são registrados somente depois que o HTML estiver pronto.
+   Um elemento ausente ou uma falha de uma API não pode mais desativar os demais botões. */
+function bindClick(id, handler){
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('click', handler);
+    return el;
+}
 
-document.getElementById('productForm').addEventListener('submit', async function(event){
-    event.preventDefault();
+function setText(id, text){
+    const el = document.getElementById(id);
+    if(el) el.textContent = text;
+}
 
-    const form = new FormData(event.target);
+async function loadIntegrations(){
+    const status = document.getElementById('meliStatus');
+    if(status) status.textContent = '🔄 Verificando conexão...';
 
-    const body = {
-        name: form.get('name'),
-        store: form.get('store') || null,
-        category: form.get('category') || null,
-        url: form.get('url') || null,
-        affiliate_url: form.get('affiliate_url') || null,
-        old_price: form.get('old_price') ? Number(form.get('old_price')) : null,
-        current_price: form.get('current_price') ? Number(form.get('current_price')) : null,
-        image_url: form.get('image_url') || null
-    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
 
-    const editId = event.target.dataset.editId;
-    const endpoint = editId ? '/api/products/' + editId : '/api/products';
-    const method = editId ? 'PUT' : 'POST';
+    try{
+        const r = await fetch('/api/integrations/status', {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal
+        });
+        if(!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
 
-    const response = await fetch(endpoint, {
-        method: method,
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body)
-    });
+        const meliConnected = !!(d.mercadolivre && d.mercadolivre.connected);
+        const amazonTag = (d.amazon && d.amazon.tag) || '';
 
-    if(!response.ok){
-        const err = await response.json().catch(() => ({}));
-        alert(err.detail || 'Não foi possível salvar o produto.');
+        setText(
+            'meliStatus',
+            meliConnected
+                ? '🟢 Mercado Livre conectado.'
+                : '🟡 Mercado Livre ainda não conectado. Clique para autorizar.'
+        );
+
+        setText(
+            'amazonStatus',
+            amazonTag
+                ? '🟢 Identificação salva: ' + amazonTag
+                : '⚪ Nenhuma identificação Amazon salva ainda.'
+        );
+
+        const amazonInput = document.getElementById('amazonTag');
+        if(amazonInput) amazonInput.value = amazonTag;
+    }catch(e){
+        setText(
+            'meliStatus',
+            e && e.name === 'AbortError'
+                ? '⚠️ Verificação demorou demais. Os botões continuam disponíveis.'
+                : '⚠️ Não foi possível verificar agora. Os botões continuam disponíveis.'
+        );
+    }finally{
+        clearTimeout(timer);
+    }
+}
+
+async function searchMercadoLivre(){
+    const queryEl = document.getElementById('meliQuery');
+    const limitEl = document.getElementById('meliLimit');
+    const out = document.getElementById('meliResults');
+
+    if(!queryEl || !out) return;
+
+    const q = queryEl.value.trim();
+    if(!q){
+        alert('Digite o produto que deseja pesquisar.');
+        queryEl.focus();
         return;
     }
 
-    event.target.reset();
-    delete event.target.dataset.editId;
-    document.getElementById('submitProductBtn').textContent = 'Cadastrar produto';
-    await loadProducts();
-    alert(editId ? 'Produto atualizado com sucesso! 🎉' : 'Produto cadastrado com sucesso! 🎉');
-});;
+    out.innerHTML = '<div class="empty">🔎 Pesquisando...</div>';
 
-loadProducts();
-
-async function loadIntegrations(){
     try{
-        const r=await fetch('/api/integrations/status');
-        const d=await r.json();
-        const m=document.getElementById('meliStatus');
-        m.textContent=d.mercadolivre.connected ? '🟢 Mercado Livre conectado.' : '🟡 Mercado Livre ainda não conectado. Clique para autorizar.';
-        document.getElementById('amazonStatus').textContent=d.amazon.tag ? '🟢 Identificação salva: '+d.amazon.tag : '⚪ Nenhuma identificação Amazon salva ainda.';
-        document.getElementById('amazonTag').value=d.amazon.tag || '';
+        const limit = Math.max(1, Math.min(20, Number(limitEl?.value || 10)));
+
+        const r = await fetch('/api/mercadolivre/search', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({query:q, limit:limit})
+        });
+
+        const d = await r.json().catch(() => ({}));
+        if(!r.ok) throw new Error(d.detail || 'Falha na busca.');
+
+        out.innerHTML = (d.items || []).map(item => `
+            <div class="opportunity">
+                <h3>${escapeHtml(item.name || 'Produto')}</h3>
+                <div class="muted">${escapeHtml(item.store || 'Mercado Livre')} · ${escapeHtml(item.category || '')}</div>
+                <div class="price">${item.current_price != null ? money(item.current_price) : 'Preço não informado'}</div>
+                ${item.image_url ? '<img class="product-image" src="' + escapeHtml(item.image_url) + '" alt="">' : ''}
+                <a class="buy-btn" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener">Ver produto</a>
+                <button class="approve-btn add-discovered-btn" type="button">➕ Adicionar ao OFERTA IA</button>
+            </div>
+        `).join('') || '<div class="empty">Nenhum produto encontrado.</div>';
+
+        // Evita onclick inline com JSON e funciona melhor em navegadores móveis.
+        Array.from(out.querySelectorAll('.add-discovered-btn')).forEach((btn, index) => {
+            btn.addEventListener('click', () => importDiscovered((d.items || [])[index]));
+        });
     }catch(e){
-        document.getElementById('meliStatus').textContent='Não foi possível verificar a conexão.';
+        out.innerHTML = '<div class="empty">⚠️ ' + escapeHtml(e.message || 'Falha na busca.') + '</div>';
     }
 }
 
-document.getElementById('meliConnectBtn').addEventListener('click',()=>{ window.location.href='/oauth/mercadolivre'; });
-document.getElementById('meliSearchBtn').addEventListener('click',()=>{
-    const box=document.getElementById('meliSearchBox');
-    box.style.display=box.style.display==='none'?'block':'none';
-});
-document.getElementById('meliSearchAction').addEventListener('click', searchMercadoLivre);
-document.getElementById('meliQuery').addEventListener('keydown',e=>{if(e.key==='Enter') searchMercadoLivre();});
-async function searchMercadoLivre(){
-    const q=document.getElementById('meliQuery').value.trim();
-    if(!q){alert('Digite o produto que deseja pesquisar.');return;}
-    const out=document.getElementById('meliResults');
-    out.innerHTML='<div class="empty">🔎 Pesquisando...</div>';
-    try{
-        const r=await fetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number(document.getElementById('meliLimit').value||10)})});
-        const d=await r.json();
-        if(!r.ok) throw new Error(d.detail||'Falha na busca');
-        out.innerHTML=(d.items||[]).map(item=>`<div class="opportunity"><h3>${escapeHtml(item.name||'Produto')}</h3><div class="muted">${escapeHtml(item.store||'Mercado Livre')} · ${escapeHtml(item.category||'')}</div><div class="price">${item.current_price?money(item.current_price):'Preço não informado'}</div>${item.image_url?'<img class="product-image" src="'+escapeHtml(item.image_url)+'" alt="">':''}<a class="buy-btn" href="${escapeHtml(item.url||'#')}" target="_blank" rel="noopener">Ver produto</a><button class="approve-btn" onclick='importDiscovered(${JSON.stringify(item).replace(/'/g,"&#39;")})'>➕ Adicionar ao OFERTA IA</button></div>`).join('')||'<div class="empty">Nenhum produto encontrado.</div>';
-    }catch(e){out.innerHTML='<div class="empty">'+escapeHtml(e.message)+'</div>';}
-}
 async function importDiscovered(item){
+    if(!item) return;
+
     try{
-        const r=await fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:item.name,store:'Mercado Livre',url:item.url,category:item.category,current_price:item.current_price,image_url:item.image_url,marketplace:'mercadolivre',item_id:item.item_id})});
-        const d=await r.json();
-        if(!r.ok) throw new Error(d.detail||'Não foi possível salvar');
+        const r = await fetch('/api/products',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({
+                name:item.name,
+                store:'Mercado Livre',
+                url:item.url,
+                category:item.category,
+                current_price:item.current_price,
+                image_url:item.image_url,
+                marketplace:'mercadolivre',
+                item_id:item.item_id
+            })
+        });
+
+        const d = await r.json().catch(() => ({}));
+        if(!r.ok) throw new Error(d.detail || 'Não foi possível salvar.');
+
         alert('Produto adicionado ao OFERTA IA.');
-        if(typeof loadProducts==='function') loadProducts();
-    }catch(e){alert(e.message);}
+        if(typeof loadProducts === 'function') await loadProducts();
+    }catch(e){
+        alert(e.message || 'Não foi possível adicionar o produto.');
+    }
 }
-document.getElementById('amazonSaveBtn').addEventListener('click',async()=>{
-    const tag=document.getElementById('amazonTag').value.trim();
-    if(!tag){alert('Informe sua identificação de associado.');return;}
-    const r=await fetch('/api/amazon/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag})});
-    const d=await r.json();
-    document.getElementById('amazonStatus').textContent=d.ok?'🟢 Identificação Amazon salva.':'❌ '+(d.detail||'Erro');
+
+document.addEventListener('DOMContentLoaded', function(){
+    // Um erro em uma integração não impede o restante da interface.
+    try{
+        bindClick('importBtn', importProductFromUrl);
+        bindClick('discoverBtn', discoverOpportunities);
+
+        const productForm = document.getElementById('productForm');
+        if(productForm){
+            productForm.addEventListener('submit', async function(event){
+                event.preventDefault();
+
+                try{
+                    const form = new FormData(event.target);
+
+                    const body = {
+                        name: form.get('name'),
+                        store: form.get('store') || null,
+                        category: form.get('category') || null,
+                        url: form.get('url') || null,
+                        affiliate_url: form.get('affiliate_url') || null,
+                        old_price: form.get('old_price') ? Number(form.get('old_price')) : null,
+                        current_price: form.get('current_price') ? Number(form.get('current_price')) : null,
+                        image_url: form.get('image_url') || null
+                    };
+
+                    const editId = event.target.dataset.editId;
+                    const endpoint = editId ? '/api/products/' + editId : '/api/products';
+                    const method = editId ? 'PUT' : 'POST';
+
+                    const response = await fetch(endpoint, {
+                        method: method,
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(body)
+                    });
+
+                    if(!response.ok){
+                        const err = await response.json().catch(() => ({}));
+                        throw new Error(err.detail || 'Não foi possível salvar o produto.');
+                    }
+
+                    event.target.reset();
+                    delete event.target.dataset.editId;
+
+                    const submitBtn = document.getElementById('submitProductBtn');
+                    if(submitBtn) submitBtn.textContent = 'Cadastrar produto';
+
+                    await loadProducts();
+                    alert(editId ? 'Produto atualizado com sucesso! 🎉' : 'Produto cadastrado com sucesso! 🎉');
+                }catch(error){
+                    alert(error.message || 'Não foi possível salvar o produto.');
+                }
+            });
+        }
+
+        bindClick('meliConnectBtn', function(){
+            window.location.href = '/oauth/mercadolivre';
+        });
+
+        bindClick('meliSearchBtn', function(){
+            const box = document.getElementById('meliSearchBox');
+            if(!box) return;
+            box.style.display = box.style.display === 'none' ? 'block' : 'none';
+
+            if(box.style.display === 'block'){
+                const input = document.getElementById('meliQuery');
+                if(input) input.focus();
+            }
+        });
+
+        bindClick('meliSearchAction', searchMercadoLivre);
+
+        const meliQuery = document.getElementById('meliQuery');
+        if(meliQuery){
+            meliQuery.addEventListener('keydown', function(e){
+                if(e.key === 'Enter'){
+                    e.preventDefault();
+                    searchMercadoLivre();
+                }
+            });
+        }
+
+        bindClick('amazonSaveBtn', async function(){
+            try{
+                const input = document.getElementById('amazonTag');
+                const tag = input ? input.value.trim() : '';
+                if(!tag){
+                    alert('Informe sua identificação de associado.');
+                    if(input) input.focus();
+                    return;
+                }
+
+                const r = await fetch('/api/amazon/settings',{
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({tag})
+                });
+
+                const d = await r.json().catch(() => ({}));
+                if(!r.ok) throw new Error(d.detail || 'Erro ao salvar.');
+
+                setText(
+                    'amazonStatus',
+                    d.ok ? '🟢 Identificação Amazon salva.' : '❌ ' + (d.detail || 'Erro')
+                );
+            }catch(e){
+                setText('amazonStatus', '❌ ' + (e.message || 'Erro ao salvar identificação.'));
+            }
+        });
+
+        // Carregamentos iniciais independentes.
+        if(typeof loadProducts === 'function') loadProducts();
+        loadIntegrations();
+
+    }catch(error){
+        // Último mecanismo de segurança: a página continua utilizável.
+        setText('meliStatus', '⚠️ Interface carregada. Algumas funções precisam ser recarregadas.');
+        console.error('OFERTA IA inicialização:', error);
+    }
 });
-loadIntegrations();
+window.addEventListener('error', function(event){
+    try{
+        const status = document.getElementById('meliStatus');
+        if(status && event && event.message){
+            status.textContent = '⚠️ Interface: ' + event.message;
+        }
+    }catch(_){}
+});
 </script>
 </body>
 </html>"""
@@ -1196,25 +1422,77 @@ def mercadolivre_search(payload: dict):
     limit = max(1, min(20, int(payload.get("limit") or 10)))
     if not query:
         raise HTTPException(400, "Informe um termo de busca.")
+
+    connection = _get_connection("mercadolivre")
+    access_token = (connection or {}).get("access_token")
+    if not access_token:
+        raise HTTPException(401, "Mercado Livre não está conectado. Autorize a conta primeiro.")
+
     try:
-        r = requests.get("https://api.mercadolibre.com/sites/MLB/search", params={"q": query, "limit": limit}, timeout=15, headers={"User-Agent":"OFERTA-IA/1.0"})
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "User-Agent": "OFERTA-IA/1.0",
+            "Accept": "application/json",
+        }
+
+        r = requests.get(
+            "https://api.mercadolibre.com/sites/MLB/search",
+            params={"q": query, "limit": limit},
+            timeout=20,
+            headers=headers,
+        )
+
+        if r.status_code == 401:
+            raise HTTPException(401, "O token do Mercado Livre expirou. Conecte novamente a conta.")
+        if r.status_code == 403:
+            detail = r.text[:400]
+            raise HTTPException(
+                403,
+                "Mercado Livre bloqueou esta busca para o token/aplicação. "
+                "Verifique as permissões da aplicação e os escopos autorizados. "
+                f"Detalhe: {detail}"
+            )
+
         r.raise_for_status()
         raw = r.json()
-        items=[]
+
+        items = []
         for x in raw.get("results", [])[:limit]:
+            original_price = x.get("original_price")
+            current_price = x.get("price")
+            discount_rate = None
+
+            if original_price and current_price and original_price > current_price:
+                discount_rate = round(
+                    ((original_price - current_price) / original_price) * 100, 2
+                )
+
             items.append({
                 "name": x.get("title"),
                 "store": "Mercado Livre",
                 "url": x.get("permalink"),
-                "current_price": x.get("price"),
+                "current_price": current_price,
+                "old_price": original_price,
+                "discount_rate": discount_rate,
                 "category": x.get("category_id"),
                 "image_url": x.get("thumbnail"),
                 "item_id": x.get("id"),
-                "sales": 0,
+                "seller_id": x.get("seller", {}).get("id"),
+                "condition": x.get("condition"),
+                "sales": x.get("sold_quantity") or 0,
                 "rating": 0,
-                "data_confidence": "media"
+                "data_confidence": "media",
             })
-        return {"items":items,"source":"mercadolivre_public_search"}
+
+        return {
+            "items": items,
+            "source": "mercadolivre_search",
+            "query": query,
+            "total": raw.get("paging", {}).get("total", len(items)),
+        }
+
+    except HTTPException:
+        raise
     except requests.RequestException as exc:
         raise HTTPException(502, f"Falha ao consultar Mercado Livre: {exc}")
 
