@@ -57,875 +57,42 @@ HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OFERTA IA</title>
 <style>
-*{box-sizing:border-box}
-body{margin:0;background:#f5f7fb;color:#172033;font-family:Arial,sans-serif}
-header{background:#111827;color:white;padding:18px 20px;position:sticky;top:0;z-index:5}
-.brand{font-size:22px;font-weight:800}.sub{font-size:12px;opacity:.7;margin-top:4px}
-main{max-width:900px;margin:auto;padding:20px}
-.hero{background:white;border-radius:20px;padding:22px;box-shadow:0 4px 18px #0000000b;margin-bottom:18px}
-.hero h1{margin:0 0 8px;font-size:25px}.hero p{margin:0;color:#667085}
-.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-.card{background:white;border-radius:18px;padding:18px;box-shadow:0 4px 18px #0000000b}
-.number{font-size:30px;font-weight:800;margin-top:7px}.label{font-size:13px;color:#667085}
-.section{margin-top:22px}.section h2{font-size:19px;margin:0 0 12px}
-button{border:0;border-radius:12px;padding:13px 16px;background:#111827;color:white;font-weight:700;cursor:pointer}
-button.buy-btn{display:block;text-align:center;margin-top:14px;background:#111827;color:white;text-decoration:none;padding:12px;border-radius:12px;font-weight:700}
-.offer-btn{margin-top:12px;width:100%;background:#e85d04}
-.form{display:grid;gap:10px}
-input{width:100%;padding:13px;border:1px solid #d7dce5;border-radius:12px;font-size:15px}
-.products{display:grid;gap:10px}
-.product{background:white;border-radius:16px;padding:17px;box-shadow:0 3px 14px #00000009}
-.product-image{width:100%;max-height:240px;object-fit:contain;border-radius:12px;margin-bottom:12px;background:#f8fafc}
-.product strong{display:block;margin-bottom:5px;font-size:17px}
-.price{font-weight:800;font-size:20px;margin-top:7px}
-.old-price{text-decoration:line-through;color:#667085;font-size:14px}
-.offer-data{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
-.metric{background:#f5f7fb;border-radius:12px;padding:10px;text-align:center}
-.metric b{display:block;font-size:17px;margin-top:4px}
-.score{background:#ecfdf3;color:#067647}
-.good{border-left:5px solid #16a34a}
-.medium{border-left:5px solid #f59e0b}
-.low{border-left:5px solid #94a3b8}
-.offer-box{margin-top:12px;padding:14px;background:#fff7ed;border-radius:14px;line-height:1.5}
-.empty{color:#667085;text-align:center;padding:20px}
-nav{display:flex;gap:8px;overflow:auto;margin:18px 0}
-nav span{background:white;border-radius:999px;padding:9px 13px;font-size:13px;white-space:nowrap}
-.channel-tabs{display:flex;gap:6px;overflow:auto;margin-bottom:10px}.tab{background:#eef2f6;color:#172033;padding:9px 11px;font-size:12px;white-space:nowrap}.tab.active{background:#111827;color:white}.copy-text{white-space:pre-wrap;line-height:1.55;background:white;border-radius:12px;padding:12px;border:1px solid #e4e7ec}.copy-btn{width:100%;margin-top:10px;background:#475467}.hashtags{margin-top:10px;font-size:13px;line-height:1.5}.hashtags div{margin-top:5px;color:#475467}
-@media(min-width:700px){.grid{grid-template-columns:repeat(4,1fr)}}
-@media(max-width:480px){.offer-data{grid-template-columns:1fr 1fr 1fr}.metric{font-size:12px}.metric b{font-size:15px}}
-
-.channel-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.channel-grid label{padding:12px;border:1px solid #e4e7ec;border-radius:12px;background:#fff}
-.opportunity{border:1px solid #e4e7ec;border-radius:16px;padding:14px;margin-bottom:12px;background:#fff}
-.opportunity h3{margin:0 0 6px}
-.badge{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700;background:#ecfdf3;color:#027a48}
-.muted{color:#667085;font-size:13px}
-.approve-btn{width:100%;margin-top:10px;background:#12b76a}
-.reject-btn{width:100%;margin-top:8px;background:#667085}
-</style>
-</head>
-<body>
-<header>
-<div class="brand">🚀 OFERTA IA</div>
-<div class="sub">Central inteligente de ofertas</div>
-</header>
-
+*{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#172033;font-family:Arial,sans-serif}header{background:#111827;color:white;padding:18px 20px;position:sticky;top:0;z-index:5}.brand{font-size:22px;font-weight:800}.sub{font-size:12px;opacity:.7;margin-top:4px}main{max-width:900px;margin:auto;padding:20px}.hero{background:white;border-radius:20px;padding:22px;box-shadow:0 4px 18px #0000000b;margin-bottom:18px}.hero h1{margin:0 0 8px;font-size:25px}.hero p{margin:0;color:#667085}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.card{background:white;border-radius:18px;padding:18px;box-shadow:0 4px 18px #0000000b}.number{font-size:30px;font-weight:800;margin-top:7px}.label{font-size:13px;color:#667085}.section{margin-top:22px}.section h2{font-size:19px;margin:0 0 12px}button{border:0;border-radius:12px;padding:13px 16px;background:#111827;color:white;font-weight:700;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.mode-btn{min-height:120px;text-align:left;padding:18px;border-radius:18px}.mode-btn strong{display:block;font-size:18px;margin-bottom:8px}.mode-btn span{display:block;font-size:13px;line-height:1.45;opacity:.8}.mode-op{background:#e85d04}.mode-prod{background:#2563eb}.form{display:grid;gap:10px}input{width:100%;padding:13px;border:1px solid #d7dce5;border-radius:12px;font-size:15px}.products{display:grid;gap:10px}.product,.opportunity{background:white;border-radius:16px;padding:17px;box-shadow:0 3px 14px #00000009}.product-image{width:100%;max-height:240px;object-fit:contain;border-radius:12px;margin-bottom:12px;background:#f8fafc}.product strong,.opportunity h3{display:block;margin-bottom:5px;font-size:17px}.price{font-weight:800;font-size:20px;margin-top:7px}.old-price{text-decoration:line-through;color:#667085;font-size:14px}.offer-data{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.metric{background:#f5f7fb;border-radius:12px;padding:10px;text-align:center;font-size:12px}.metric b{display:block;font-size:16px;margin-top:4px}.score{background:#ecfdf3;color:#067647}.good{border-left:5px solid #16a34a}.medium{border-left:5px solid #f59e0b}.low{border-left:5px solid #94a3b8}.offer-box{margin-top:12px;padding:14px;background:#fff7ed;border-radius:14px;line-height:1.5}.empty{color:#667085;text-align:center;padding:20px}.muted{color:#667085;font-size:13px;line-height:1.5}.hidden{display:none}.buy-btn{display:block;text-align:center;margin-top:12px;background:#111827;color:white;text-decoration:none;padding:12px;border-radius:12px;font-weight:700}.approve-btn{width:100%;margin-top:10px;background:#12b76a}.reject-btn{width:100%;margin-top:8px;background:#667085}.channel-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.channel-grid label{padding:12px;border:1px solid #e4e7ec;border-radius:12px;background:#fff}.badge{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700;background:#ecfdf3;color:#027a48}.search-head{display:flex;justify-content:space-between;align-items:center;gap:10px}.close-btn{background:#667085;padding:9px 12px;font-size:12px}@media(max-width:520px){.mode-grid{grid-template-columns:1fr}.offer-data{grid-template-columns:repeat(3,1fr)}.grid{grid-template-columns:1fr 1fr}}
+</style></head>
+<body><header><div class="brand">🚀 OFERTA IA</div><div class="sub">Central inteligente de ofertas</div></header>
 <main>
-<div class="hero">
-<h1>Olá! 👋</h1>
-<p>Vamos encontrar, analisar e transformar produtos em boas ofertas.</p>
-</div>
+<div class="hero"><h1>Encontre oportunidades de venda</h1><p>Escolha o que deseja fazer. <b>Oportunidades</b> e <b>Produtos</b> são funções independentes.</p></div>
+<div class="grid"><div class="card"><div class="label">Produtos cadastrados</div><div class="number" id="products">0</div></div><div class="card"><div class="label">Ofertas geradas</div><div class="number" id="offers">0</div></div></div>
+<div class="section"><h2>O que você quer fazer?</h2><div class="mode-grid">
+<button class="mode-btn mode-op" id="openOpportunities"><strong>🔥 OPORTUNIDADES</strong><span>O sistema procura automaticamente produtos com maior potencial comercial. Não precisa informar produto.</span></button>
+<button class="mode-btn mode-prod" id="openProducts"><strong>📦 PRODUTOS</strong><span>Pesquise um produto ou nicho específico. A pesquisa não mistura o ranking de oportunidades.</span></button>
+</div></div>
 
-<nav>
-<span>🏠 Início</span>
-<span>🛍️ Produtos</span>
-<span>🔥 Ofertas</span>
-<span>🤖 IA</span>
-<span>📊 Métricas</span>
-</nav>
+<section id="opportunitySection" class="section hidden"><div class="search-head"><h2>🔥 Oportunidades</h2><button class="close-btn" id="closeOpportunities">Fechar</button></div><div class="card"><p class="muted">Modo automático: o OFERTA IA consulta sinais de produtos populares e ranqueia as melhores oportunidades disponíveis.</p><input id="opportunityNiche" placeholder="Opcional: informe um nicho, ex.: beleza, fitness, eletrônicos"><input id="opportunityLimit" type="number" min="5" max="30" value="10" placeholder="Quantidade"><button id="runOpportunities" style="margin-top:8px;background:#e85d04;width:100%">🔥 Encontrar oportunidades</button><div id="opportunityStatus" class="muted" style="margin-top:10px"></div><div id="opportunityList" style="margin-top:12px"></div></div></section>
 
-<div class="grid">
-<div class="card"><div class="label">Produtos</div><div class="number" id="products">0</div></div>
-<div class="card"><div class="label">Ofertas</div><div class="number" id="offers">0</div></div>
-<div class="card"><div class="label">Cliques</div><div class="number">0</div></div>
-<div class="card"><div class="label">Publicações</div><div class="number">0</div></div>
-</div>
+<section id="productSection" class="section hidden"><div class="search-head"><h2>📦 Produtos</h2><button class="close-btn" id="closeProducts">Fechar</button></div><div class="card"><p class="muted">Pesquisa específica. Digite o produto ou nicho desejado. Resultados irrelevantes são filtrados antes de aparecer.</p><input id="productSearch" placeholder="Ex.: smartwatch, celular, air fryer"><input id="productLimit" type="number" min="1" max="20" value="10"><button id="runProductSearch" style="margin-top:8px;background:#2563eb;width:100%">🔎 Pesquisar produtos</button><div id="productSearchStatus" class="muted" style="margin-top:10px"></div><div id="productResults" style="margin-top:12px"></div></div></section>
 
-<div class="section">
-<h2>➕ Cadastrar produto</h2>
-<div class="card">
-<form class="form" id="productForm">
-<input name="name" placeholder="Nome do produto" required>
-<input name="store" placeholder="Loja">
-<input name="category" placeholder="Categoria">
-<input name="url" placeholder="Cole o link do produto aqui" id="productUrl">
-<button type="button" id="importBtn" style="background:#2563eb">🔎 Buscar dados pelo link</button>
-<div id="importStatus" style="font-size:13px;color:#667085"></div>
-<input name="affiliate_url" placeholder="Link de afiliado">
-<input name="old_price" type="number" step="0.01" placeholder="Preço antigo">
-<input name="current_price" type="number" step="0.01" placeholder="Preço atual">
-<input name="image_url" placeholder="URL da imagem do produto">
-<button type="submit" id="submitProductBtn">Cadastrar produto</button>
-</form>
-</div>
-</div>
-
-<div class="section">
-<h2>🛒 Mercado Livre</h2>
-<div class="card">
-<div id="meliStatus" class="muted">Verificando conexão...</div>
-<button type="button" id="meliConnectBtn" style="margin-top:10px;background:#2563eb">🔐 Conectar Mercado Livre</button>
-<button type="button" id="meliDiagnosticBtn" style="margin-top:10px;background:#475467">🩺 Diagnosticar Mercado Livre</button>
-<button type="button" id="meliSearchBtn" style="margin-top:10px">🔎 Pesquisar produtos</button>
-<div id="meliDiagnostic" class="muted" style="margin-top:12px;line-height:1.55"></div>
-<div id="meliSearchBox" style="display:none;margin-top:12px">
-<input id="meliQuery" placeholder="Ex.: celular, air fryer, fone bluetooth">
-<input id="meliLimit" type="number" min="1" max="20" value="10" placeholder="Quantidade">
-<button type="button" id="meliSearchAction" style="margin-top:8px;background:#12b76a">🔎 Buscar produtos no catálogo</button>
-<div id="meliCatalogHint" class="muted" style="margin-top:8px">Teste oficial do catálogo de produtos, usando sua autorização do Mercado Livre.</div>
-<div id="meliResults" style="margin-top:12px"></div>
-</div>
-</div>
-</div>
-
-<div class="section">
-<h2>🎯 Descoberta inteligente de oportunidades</h2>
-<div class="card">
-<p class="muted">O sistema analisa os produtos disponíveis e prioriza oportunidades pelo potencial de oferta.</p>
-<input id="discoveryCategory" placeholder="Categoria (opcional)">
-<input id="discoveryMinDiscount" type="number" min="0" max="100" value="10" placeholder="Desconto mínimo (%)">
-<input id="discoveryLimit" type="number" min="1" max="50" value="10" placeholder="Quantidade de oportunidades">
-<button type="button" id="discoverBtn" style="margin-top:8px;background:#e85d04">🔎 Buscar oportunidades</button>
-<div id="discoveryStatus" class="muted" style="margin-top:10px"></div>
-<div id="opportunityList" style="margin-top:12px"></div>
-</div>
-</div>
-
-<div class="section">
-<h2>📢 Canais de publicação</h2>
-<div class="card">
-<div id="channelOptions" class="channel-grid">
-<label><input type="checkbox" value="whatsapp" checked> 💬 WhatsApp</label>
-<label><input type="checkbox" value="instagram"> 📸 Instagram</label>
-<label><input type="checkbox" value="telegram"> ✈️ Telegram</label>
-</div>
-</div>
-</div>
-
-<div class="section">
-<h2>🛍️ Amazon</h2>
-<div class="card">
-<div id="amazonStatus" class="muted">Nenhuma identificação Amazon salva ainda.</div>
-<input id="amazonTag" placeholder="Sua identificação de associado Amazon">
-<button type="button" id="amazonSaveBtn" style="margin-top:8px;background:#2563eb">💾 Salvar identificação Amazon</button>
-</div>
-</div>
-
-<div class="section">
-<h2>🔥 Análise das ofertas</h2>
-<div id="productList" class="products"></div>
-</div>
+<div class="section"><h2>📢 Canais de publicação</h2><div class="card"><div id="channelOptions" class="channel-grid"><label><input type="checkbox" value="whatsapp" checked> 💬 WhatsApp</label><label><input type="checkbox" value="instagram"> 📸 Instagram</label><label><input type="checkbox" value="telegram"> ✈️ Telegram</label></div></div></div>
+<div class="section"><h2>🛒 Integração Mercado Livre</h2><div class="card"><div id="meliStatus" class="muted">Verificando conexão...</div><button id="meliConnectBtn" style="margin-top:10px;background:#2563eb">🔐 Conectar Mercado Livre</button><button id="meliDiagnosticBtn" style="margin-top:10px;background:#475467">🩺 Diagnosticar</button><div id="meliDiagnostic" class="muted" style="margin-top:10px"></div></div></div>
+<div class="section"><h2>🛍️ Amazon</h2><div class="card"><div id="amazonStatus" class="muted">Nenhuma identificação salva.</div><input id="amazonTag" placeholder="Sua identificação de associado Amazon"><button id="amazonSaveBtn" style="margin-top:8px;background:#2563eb">💾 Salvar identificação</button></div></div>
+<div class="section"><h2>➕ Cadastro manual</h2><div class="card"><form class="form" id="productForm"><input name="name" placeholder="Nome do produto" required><input name="store" placeholder="Loja"><input name="category" placeholder="Categoria"><input name="url" placeholder="Link do produto" id="productUrl"><button type="button" id="importBtn" style="background:#475467">🔎 Buscar dados pelo link</button><div id="importStatus" class="muted"></div><input name="affiliate_url" placeholder="Link de afiliado"><input name="old_price" type="number" step="0.01" placeholder="Preço antigo"><input name="current_price" type="number" step="0.01" placeholder="Preço atual"><input name="image_url" placeholder="URL da imagem"><button type="submit" id="submitProductBtn">Cadastrar produto</button></form></div></div>
+<div class="section"><h2>📚 Meus produtos</h2><div id="productList" class="products"></div></div>
 </main>
-
 <script>
-function money(value){
-    return 'R$ ' + Number(value).toFixed(2).replace('.', ',');
-}
-
-function calculateOffer(p){
-    const oldPrice = Number(p.old_price);
-    const currentPrice = Number(p.current_price);
-
-    if(!oldPrice || !currentPrice || oldPrice <= 0 || currentPrice <= 0 || currentPrice >= oldPrice){
-        return null;
-    }
-
-    const savings = oldPrice - currentPrice;
-    const discount = (savings / oldPrice) * 100;
-
-    // Score transparente do MVP: desconto (60), economia (15),
-    // link de afiliado (10), URL do produto (5), loja (5), categoria (5).
-    let discountPoints = 0;
-    if(discount >= 50) discountPoints = 60;
-    else if(discount >= 40) discountPoints = 50;
-    else if(discount >= 30) discountPoints = 40;
-    else if(discount >= 20) discountPoints = 28;
-    else if(discount >= 10) discountPoints = 15;
-    else discountPoints = 5;
-
-    let savingsPoints = 0;
-    if(savings >= 200) savingsPoints = 15;
-    else if(savings >= 100) savingsPoints = 12;
-    else if(savings >= 50) savingsPoints = 9;
-    else if(savings >= 20) savingsPoints = 6;
-    else savingsPoints = 2;
-
-    const affiliatePoints = p.affiliate_url ? 10 : 0;
-    const urlPoints = p.url ? 5 : 0;
-    const storePoints = p.store ? 5 : 0;
-    const categoryPoints = p.category ? 5 : 0;
-
-    const score = Math.min(
-        100,
-        discountPoints + savingsPoints + affiliatePoints +
-        urlPoints + storePoints + categoryPoints
-    );
-
-    return {
-        savings: savings,
-        discount: discount,
-        score: score,
-        breakdown: {
-            discount: discountPoints,
-            savings: savingsPoints,
-            affiliate: affiliatePoints,
-            url: urlPoints,
-            store: storePoints,
-            category: categoryPoints
-        }
-    };
-}
-
-function scoreClass(score){
-    if(score >= 70) return 'good';
-    if(score >= 40) return 'medium';
-    return 'low';
-}
-
-function escapeHtml(text){
-    return String(text || '').replace(/[&<>"']/g, function(c){
-        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c];
-    });
-}
-
-function generateOffer(p, analysis, generated){
-    const store = p.store ? ' na ' + p.store : '';
-    const link = p.affiliate_url || p.url;
-    const whatsapp = generated.whatsapp || generated.raw || '';
-    const instagram = generated.instagram || whatsapp;
-    const telegram = generated.telegram || whatsapp;
-    const hashtags = generated.hashtags || '';
-
-    return `
-        <div class="offer-box">
-            <div style="font-weight:800;margin-bottom:10px">🤖 Oferta criada pelo Gemini</div>
-            <div class="channel-tabs">
-                <button class="tab active" onclick="showChannel(this,'whatsapp')">💬 WhatsApp</button>
-                <button class="tab" onclick="showChannel(this,'instagram')">📸 Instagram</button>
-                <button class="tab" onclick="showChannel(this,'telegram')">✈️ Telegram</button>
-            </div>
-            <div class="channel-content" data-channel="whatsapp"><div class="copy-text">${escapeHtml(whatsapp)}</div></div>
-            <div class="channel-content" data-channel="instagram" style="display:none"><div class="copy-text">${escapeHtml(instagram)}</div></div>
-            <div class="channel-content" data-channel="telegram" style="display:none"><div class="copy-text">${escapeHtml(telegram)}</div></div>
-            <button class="copy-btn" onclick="copyCurrent(this)">📋 Copiar texto</button>
-            ${hashtags ? '<div class="hashtags"><strong>#️⃣ Hashtags</strong><div>' + escapeHtml(hashtags) + '</div></div>' : ''}
-            <hr style="border:0;border-top:1px solid #ddd;margin:14px 0">
-            <div><strong>💰 Economia:</strong> ${money(analysis.savings)} · <strong>${analysis.discount.toFixed(2).replace('.', ',')}% OFF</strong>${store}</div>
-            ${link ? '<a class="buy-btn" href="' + escapeHtml(link) + '" target="_blank" rel="noopener">🛒 Ver oferta</a>' : ''}
-        </div>
-    `;
-}
-
-function showChannel(button, channel){
-    const box = button.closest('.offer-box');
-    box.querySelectorAll('.channel').forEach(function(){ });
-    box.querySelectorAll('.channel-content').forEach(function(el){
-        el.style.display = el.dataset.channel === channel ? 'block' : 'none';
-    });
-    box.querySelectorAll('.tab').forEach(function(tab){ tab.classList.remove('active'); });
-    button.classList.add('active');
-}
-
-async function copyCurrent(button){
-    const box = button.closest('.offer-box');
-    const visible = Array.from(box.querySelectorAll('.channel-content')).find(el => el.style.display !== 'none');
-    const text = visible ? visible.querySelector('.copy-text').innerText : '';
-    try{
-        await navigator.clipboard.writeText(text);
-        button.textContent = '✅ Copiado!';
-        setTimeout(() => button.textContent = '📋 Copiar texto', 1500);
-    }catch(e){
-        alert('Não foi possível copiar automaticamente.');
-    }
-}
-
-
-
-function selectedChannels(){
-    return Array.from(document.querySelectorAll('#channelOptions input:checked')).map(x => x.value);
-}
-
-function opportunityHtml(item, index){
-    const score = Number(item.opportunity_score || 0);
-    const scoreLabel = score >= 90 ? 'EXCELENTE OPORTUNIDADE' :
-                       score >= 80 ? 'BOA OPORTUNIDADE' :
-                       score >= 65 ? 'OPORTUNIDADE MODERADA' : 'BAIXA OPORTUNIDADE';
-    const price = item.current_price != null ? 'R$ ' + Number(item.current_price).toFixed(2).replace('.',',') : '—';
-    const oldPrice = item.old_price != null ? 'R$ ' + Number(item.old_price).toFixed(2).replace('.',',') : '—';
-    const sales = item.sales != null ? Number(item.sales).toLocaleString('pt-BR') : 'não informado';
-    const commission = item.commission_rate != null ? Number(item.commission_rate).toFixed(2).replace('.',',') + '%' : 'não informada';
-    const competition = item.competition_index != null ? Number(item.competition_index).toFixed(0) + '/100' : 'não estimada';
-    return `<div class="opportunity" id="opportunity-${index}">
-        <span class="badge">⭐ ${score.toFixed(0)}/100 · ${scoreLabel}</span>
-        <h3>${escapeHtml(item.name || 'Produto')}</h3>
-        <div class="muted">${escapeHtml(item.store || item.marketplace || '')} · ${escapeHtml(item.category || '')}</div>
-        <div style="margin-top:8px"><b>${price}</b> <span class="muted">de ${oldPrice}</span></div>
-        <div class="offer-data" style="margin-top:10px">
-          <div class="metric">Vendas <b>${sales}</b></div>
-          <div class="metric">Comissão <b>${commission}</b></div>
-          <div class="metric">Concorrência <b>${competition}</b></div>
-          <div class="metric">Confiança <b>${escapeHtml(item.data_confidence || 'estimada')}</b></div>
-        </div>
-        <button class="approve-btn" onclick="approveOpportunity(${index})">✅ Aprovar e publicar</button>
-        <button class="reject-btn" onclick="rejectOpportunity(${index})">❌ Descartar</button>
-    </div>`;
-}
-
-async function discoverOpportunities(){
-    const status = document.getElementById('discoveryStatus');
-    const list = document.getElementById('opportunityList');
-    const btn = document.getElementById('discoverBtn');
-    btn.disabled = true;
-    btn.textContent = '⏳ Pesquisando...';
-    status.textContent = 'Buscando e analisando produtos nas fontes conectadas...';
-    try{
-        const response = await fetch('/api/discover-opportunities', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                category: document.getElementById('discoveryCategory').value,
-                min_discount: Number(document.getElementById('discoveryMinDiscount').value || 0),
-                limit: Number(document.getElementById('discoveryLimit').value || 10)
-            })
-        });
-        const data = await response.json();
-        if(!response.ok) throw new Error(data.detail || 'Falha na pesquisa.');
-        window.currentOpportunities = data.items || [];
-        list.innerHTML = window.currentOpportunities.length
-            ? window.currentOpportunities.map(opportunityHtml).join('')
-            : '<div class="card empty">Nenhuma oportunidade encontrada com os critérios atuais.</div>';
-        status.textContent = `✅ ${window.currentOpportunities.length} oportunidade(s) encontrada(s).`;
-    }catch(error){
-        status.textContent = '⚠️ ' + (error.message || 'Falha na pesquisa.');
-    }finally{
-        btn.disabled = false;
-        btn.textContent = '🔎 Buscar oportunidades';
-    }
-}
-
-async function approveOpportunity(index){
-    const item = window.currentOpportunities?.[index];
-    if(!item) return;
-    const channels = selectedChannels();
-    if(!channels.length){
-        alert('Selecione pelo menos um canal de publicação.');
-        return;
-    }
-    const box = document.getElementById('opportunity-' + index);
-    box.innerHTML += '<div class="offer-box">🤖 Aprovado. Gerando oferta e preparando publicação...</div>';
-    try{
-        const response = await fetch('/api/approve-and-publish', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({product:item, channels:channels})
-        });
-        const data = await response.json();
-        if(!response.ok) throw new Error(data.detail || 'Falha na publicação.');
-        box.innerHTML = `<div class="offer-box">✅ Aprovado.<br>${escapeHtml(data.message || 'Oferta preparada para publicação automática.')}</div>`;
-    }catch(error){
-        box.innerHTML += '<div class="offer-box">⚠️ ' + (error.message || 'Falha na publicação.') + '</div>';
-    }
-}
-
-function rejectOpportunity(index){
-    const box = document.getElementById('opportunity-' + index);
-    if(box) box.remove();
-}
-
-async function loadProducts(){
-    try{
-        const response = await fetch('/api/products');
-        const data = await response.json();
-
-        document.getElementById('products').textContent = data.length;
-
-        let validOffers = 0;
-        const list = document.getElementById('productList');
-
-        if(!data.length){
-            list.innerHTML = '<div class="card empty">Nenhum produto cadastrado ainda.</div>';
-            document.getElementById('offers').textContent = '0';
-            return;
-        }
-
-        list.innerHTML = data.map(function(p, index){
-            const analysis = calculateOffer(p);
-
-            if(analysis) validOffers++;
-
-            const store = p.store || '';
-            const category = p.category || '';
-            const price = p.current_price != null ? money(p.current_price) : '';
-            const image = p.image_url ? '<img class="product-image" src="' + escapeHtml(p.image_url) + '" alt="" loading="lazy">' : '';
-
-            if(!analysis){
-                return `
-                <div class="product low">
-                    ${image}
-                    <strong>${escapeHtml(p.name || '')}</strong>
-                    <div>${store}${category ? ' · ' + category : ''}</div>
-                    ${price ? '<div class="price">' + price + '</div>' : ''}
-                    <div class="offer-box">⚠️ Preços insuficientes para calcular uma oferta.</div>
-                </div>`;
-            }
-
-            return `
-            <div class="product ${scoreClass(analysis.score)}" id="product-${index}">
-                ${image}
-                <strong>${escapeHtml(p.name || '')}</strong>
-                <div>${store}${category ? ' · ' + category : ''}</div>
-                <div class="old-price">${money(p.old_price)}</div>
-                <div class="price">${money(p.current_price)}</div>
-
-                <div class="offer-data">
-                    <div class="metric">
-                        Desconto
-                        <b>${analysis.discount.toFixed(2).replace('.', ',')}%</b>
-                    </div>
-                    <div class="metric">
-                        Economia
-                        <b>${money(analysis.savings)}</b>
-                    </div>
-                    <div class="metric score">
-                        Score
-                        <b>⭐ ${analysis.score}/100</b>
-                    </div>
-                </div>
-
-                <details style="margin-top:10px">
-                    <summary style="cursor:pointer;font-size:13px;color:#475467">
-                        🔎 Como chegamos ao score?
-                    </summary>
-                    <div style="margin-top:8px;font-size:12px;color:#475467;line-height:1.7">
-                        Desconto: <b>${analysis.breakdown.discount}/60</b> ·
-                        Economia: <b>${analysis.breakdown.savings}/15</b> ·
-                        Afiliado: <b>${analysis.breakdown.affiliate}/10</b> ·
-                        Link: <b>${analysis.breakdown.url}/5</b> ·
-                        Loja: <b>${analysis.breakdown.store}/5</b> ·
-                        Categoria: <b>${analysis.breakdown.category}/5</b>
-                    </div>
-                </details>
-
-                <button class="offer-btn" onclick="showOffer(${index})">
-                    🔥 Gerar oferta
-                </button>
-                <button style="margin-top:8px;width:100%;background:#475467" onclick="editProduct(${index})">✏️ Editar produto</button>
-
-                <div id="offer-${index}"></div>
-            </div>`;
-        }).join('');
-
-        document.getElementById('offers').textContent = validOffers;
-
-        window.currentProducts = data;
-    }catch(error){
-        document.getElementById('productList').innerHTML =
-            '<div class="card empty">Não foi possível carregar os produtos.</div>';
-    }
-}
-
-async function showOffer(index){
-    const p = window.currentProducts[index];
-    const analysis = calculateOffer(p);
-    if(!analysis) return;
-
-    const box = document.getElementById('offer-' + index);
-    box.innerHTML = '<div class="offer-box">🤖 Criando oferta com IA...</div>';
-
-    try{
-        const response = await fetch('/api/generate-offer', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({product: p, analysis: analysis})
-        });
-        const data = await response.json();
-        if(!response.ok){ throw new Error(data.detail || 'Erro ao gerar oferta'); }
-        box.innerHTML = generateOffer(p, analysis, data);
-    }catch(error){
-        box.innerHTML = '<div class="offer-box">⚠️ ' + (error.message || 'Não foi possível gerar a oferta.') + '</div>';
-    }
-}
-
-async function editProduct(index){
-    const p = window.currentProducts[index];
-    if(!p) return;
-
-    const form = document.getElementById('productForm');
-    form.dataset.editId = p.id;
-    form.name.value = p.name || '';
-    form.store.value = p.store || '';
-    form.category.value = p.category || '';
-    form.url.value = p.url || '';
-    form.affiliate_url.value = p.affiliate_url || '';
-    form.old_price.value = p.old_price ?? '';
-    form.current_price.value = p.current_price ?? '';
-    form.image_url.value = p.image_url || '';
-
-    document.getElementById('submitProductBtn').textContent = '💾 Salvar alterações';
-    window.scrollTo({top: form.closest('.section').offsetTop - 10, behavior:'smooth'});
-}
-
-
-async function importProductFromUrl(){
-    const url = document.getElementById('productUrl').value.trim();
-    const status = document.getElementById('importStatus');
-
-    if(!url){
-        status.textContent = 'Cole primeiro o link do produto.';
-        return;
-    }
-
-    const btn = document.getElementById('importBtn');
-    btn.disabled = true;
-    btn.textContent = '⏳ Buscando...';
-    status.textContent = 'Lendo os dados da página...';
-
-    try{
-        const response = await fetch('/api/import-product', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({url: url})
-        });
-
-        const data = await response.json();
-
-        if(!response.ok){
-            throw new Error(data.detail || 'Não foi possível ler o produto.');
-        }
-
-        const form = document.getElementById('productForm');
-
-        if(data.name) form.name.value = data.name;
-        if(data.store) form.store.value = data.store;
-        if(data.category) form.category.value = data.category;
-        if(data.url) form.url.value = data.url;
-        if(data.image_url) form.image_url.value = data.image_url;
-        if(data.old_price != null) form.old_price.value = data.old_price;
-        if(data.current_price != null) form.current_price.value = data.current_price;
-
-        status.textContent = '✅ Dados encontrados. Confira os campos antes de salvar.';
-    }catch(error){
-        status.textContent = '⚠️ ' + (error.message || 'Falha ao importar.');
-    }finally{
-        btn.disabled = false;
-        btn.textContent = '🔎 Buscar dados pelo link';
-    }
-}
-
-/* Inicialização segura da interface.
-   Todos os eventos são registrados somente depois que o HTML estiver pronto.
-   Um elemento ausente ou uma falha de uma API não pode mais desativar os demais botões. */
-function bindClick(id, handler){
-    const el = document.getElementById(id);
-    if(el) el.addEventListener('click', handler);
-    return el;
-}
-
-function setText(id, text){
-    const el = document.getElementById(id);
-    if(el) el.textContent = text;
-}
-
-async function loadIntegrations(){
-    const status = document.getElementById('meliStatus');
-    if(status) status.textContent = '🔄 Verificando conexão...';
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-
-    try{
-        const r = await fetch('/api/integrations/status', {
-            method: 'GET',
-            cache: 'no-store',
-            signal: controller.signal
-        });
-        if(!r.ok) throw new Error('HTTP ' + r.status);
-        const d = await r.json();
-
-        const meliConnected = !!(d.mercadolivre && d.mercadolivre.connected);
-        const amazonTag = (d.amazon && d.amazon.tag) || '';
-
-        setText(
-            'meliStatus',
-            meliConnected
-                ? '🟢 Mercado Livre conectado.'
-                : '🟡 Mercado Livre ainda não conectado. Clique para autorizar.'
-        );
-
-        setText(
-            'amazonStatus',
-            amazonTag
-                ? '🟢 Identificação salva: ' + amazonTag
-                : '⚪ Nenhuma identificação Amazon salva ainda.'
-        );
-
-        const amazonInput = document.getElementById('amazonTag');
-        if(amazonInput) amazonInput.value = amazonTag;
-    }catch(e){
-        setText(
-            'meliStatus',
-            e && e.name === 'AbortError'
-                ? '⚠️ Verificação demorou demais. Os botões continuam disponíveis.'
-                : '⚠️ Não foi possível verificar agora. Os botões continuam disponíveis.'
-        );
-    }finally{
-        clearTimeout(timer);
-    }
-}
-
-async function diagnoseMercadoLivre(){
-    const out = document.getElementById('meliDiagnostic');
-    const btn = document.getElementById('meliDiagnosticBtn');
-    if(!out) return;
-
-    if(btn){
-        btn.disabled = true;
-        btn.textContent = '🩺 Diagnosticando...';
-    }
-    out.innerHTML = '🔄 Consultando o token salvo e a API do Mercado Livre...';
-
-    try{
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 15000);
-        let r;
-        try{
-            r = await fetch('/api/mercadolivre/diagnostico', {
-                method:'GET',
-                cache:'no-store',
-                signal:controller.signal
-            });
-        }finally{
-            clearTimeout(timer);
-        }
-
-        const d = await r.json().catch(() => ({}));
-        if(!r.ok){
-            throw new Error(d.detail || 'Falha no diagnóstico.');
-        }
-
-        const esc = window.escapeHtml || function(v){
-            return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        };
-
-        const rows = d.tests || [];
-        out.innerHTML = '<div style="margin-bottom:8px"><strong>Resultado do diagnóstico</strong></div>' +
-            rows.map(t => {
-                const icon = t.ok ? '✅' : '❌';
-                return '<div style="margin-top:6px">' + icon + ' <strong>' + esc(t.name) + '</strong>: HTTP ' + esc(t.http_status ?? '—') + '<br><span class="muted">' + esc(t.message || '') + '</span></div>';
-            }).join('') +
-            (d.summary ? '<div style="margin-top:10px"><strong>Resumo:</strong> ' + esc(d.summary) + '</div>' : '') +
-            (d.app ? '<div style="margin-top:10px"><strong>Aplicação:</strong> ' + esc(d.app.certification_status || '—') + ' · ativa=' + esc(d.app.active) + ' · sandbox=' + esc(d.app.sandbox_mode) + '</div>' : '');
-    }catch(e){
-        out.innerHTML = '⚠️ ' + (e && e.name === 'AbortError' ? 'O diagnóstico demorou demais.' : (e.message || 'Falha no diagnóstico.'));
-    }finally{
-        if(btn){
-            btn.disabled = false;
-            btn.textContent = '🩺 Diagnosticar Mercado Livre';
-        }
-    }
-}
-
-async function searchMercadoLivre(){
-    const queryEl = document.getElementById('meliQuery');
-    const limitEl = document.getElementById('meliLimit');
-    const out = document.getElementById('meliResults');
-
-    if(!queryEl || !out) return;
-
-    const q = queryEl.value.trim();
-    if(!q){
-        alert('Digite o produto que deseja pesquisar.');
-        queryEl.focus();
-        return;
-    }
-
-    out.innerHTML = '<div class="empty">🔎 Pesquisando...</div>';
-
-    try{
-        const limit = Math.max(1, Math.min(20, Number(limitEl?.value || 10)));
-
-        const r = await fetch('/api/mercadolivre/search', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({query:q, limit:limit})
-        });
-
-        const d = await r.json().catch(() => ({}));
-        if(!r.ok) throw new Error(d.detail || 'Falha na busca.');
-
-        const diag = d.diagnostic || {};
-        const diagHtml = `<div class="muted" style="margin-bottom:10px">${escapeHtml(d.message || '')}${d.returned === 0 ? '<br>Catálogo: ' + (diag.catalog_candidates ?? 0) + ' · detalhes: ' + (diag.catalog_details_ok ?? 0) + ' · publicações: ' + (diag.publication_lists_ok ?? 0) + ' · sem publicação: ' + (diag.products_without_publications ?? 0) + ' · sem preço: ' + (diag.products_without_price ?? 0) + ' · erros: ' + (diag.errors ?? 0) : ''}</div>`;
-        out.innerHTML = diagHtml + (d.items || []).map(item => `
-            <div class="opportunity">
-                <h3>${escapeHtml(item.name || 'Produto')}</h3>
-                <div class="muted">${escapeHtml(item.store || 'Mercado Livre')} · ${escapeHtml(item.category || '')}</div>
-                <div class="price">${item.current_price != null ? money(item.current_price) : 'Preço não informado'}</div>
-                ${item.image_url ? '<img class="product-image" src="' + escapeHtml(item.image_url) + '" alt="">' : ''}
-                <a class="buy-btn" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener">Ver produto</a>
-                <button class="approve-btn add-discovered-btn" type="button">➕ Adicionar ao OFERTA IA</button>
-            </div>
-        `).join('') || '<div class="empty">Nenhum produto encontrado.</div>';
-
-        // Evita onclick inline com JSON e funciona melhor em navegadores móveis.
-        Array.from(out.querySelectorAll('.add-discovered-btn')).forEach((btn, index) => {
-            btn.addEventListener('click', () => importDiscovered((d.items || [])[index]));
-        });
-    }catch(e){
-        out.innerHTML = '<div class="empty">⚠️ ' + escapeHtml(e.message || 'Falha na busca.') + '</div>';
-    }
-}
-
-async function importDiscovered(item){
-    if(!item) return;
-
-    try{
-        const r = await fetch('/api/products',{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({
-                name:item.name,
-                store:'Mercado Livre',
-                url:item.url,
-                category:item.category,
-                current_price:item.current_price,
-                image_url:item.image_url,
-                marketplace:'mercadolivre',
-                item_id:item.item_id
-            })
-        });
-
-        const d = await r.json().catch(() => ({}));
-        if(!r.ok) throw new Error(d.detail || 'Não foi possível salvar.');
-
-        alert('Produto adicionado ao OFERTA IA.');
-        if(typeof loadProducts === 'function') await loadProducts();
-    }catch(e){
-        alert(e.message || 'Não foi possível adicionar o produto.');
-    }
-}
-
-document.addEventListener('DOMContentLoaded', function(){
-    // Um erro em uma integração não impede o restante da interface.
-    try{
-        bindClick('importBtn', importProductFromUrl);
-        bindClick('discoverBtn', discoverOpportunities);
-
-        const productForm = document.getElementById('productForm');
-        if(productForm){
-            productForm.addEventListener('submit', async function(event){
-                event.preventDefault();
-
-                try{
-                    const form = new FormData(event.target);
-
-                    const body = {
-                        name: form.get('name'),
-                        store: form.get('store') || null,
-                        category: form.get('category') || null,
-                        url: form.get('url') || null,
-                        affiliate_url: form.get('affiliate_url') || null,
-                        old_price: form.get('old_price') ? Number(form.get('old_price')) : null,
-                        current_price: form.get('current_price') ? Number(form.get('current_price')) : null,
-                        image_url: form.get('image_url') || null
-                    };
-
-                    const editId = event.target.dataset.editId;
-                    const endpoint = editId ? '/api/products/' + editId : '/api/products';
-                    const method = editId ? 'PUT' : 'POST';
-
-                    const response = await fetch(endpoint, {
-                        method: method,
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify(body)
-                    });
-
-                    if(!response.ok){
-                        const err = await response.json().catch(() => ({}));
-                        throw new Error(err.detail || 'Não foi possível salvar o produto.');
-                    }
-
-                    event.target.reset();
-                    delete event.target.dataset.editId;
-
-                    const submitBtn = document.getElementById('submitProductBtn');
-                    if(submitBtn) submitBtn.textContent = 'Cadastrar produto';
-
-                    await loadProducts();
-                    alert(editId ? 'Produto atualizado com sucesso! 🎉' : 'Produto cadastrado com sucesso! 🎉');
-                }catch(error){
-                    alert(error.message || 'Não foi possível salvar o produto.');
-                }
-            });
-        }
-
-        bindClick('meliConnectBtn', function(){
-            window.location.href = '/oauth/mercadolivre';
-        });
-
-        bindClick('meliDiagnosticBtn', diagnoseMercadoLivre);
-
-        bindClick('meliSearchBtn', function(){
-            const box = document.getElementById('meliSearchBox');
-            if(!box) return;
-            box.style.display = box.style.display === 'none' ? 'block' : 'none';
-
-            if(box.style.display === 'block'){
-                const input = document.getElementById('meliQuery');
-                if(input) input.focus();
-            }
-        });
-
-        bindClick('meliSearchAction', searchMercadoLivre);
-
-        const meliQuery = document.getElementById('meliQuery');
-        if(meliQuery){
-            meliQuery.addEventListener('keydown', function(e){
-                if(e.key === 'Enter'){
-                    e.preventDefault();
-                    searchMercadoLivre();
-                }
-            });
-        }
-
-        bindClick('amazonSaveBtn', async function(){
-            try{
-                const input = document.getElementById('amazonTag');
-                const tag = input ? input.value.trim() : '';
-                if(!tag){
-                    alert('Informe sua identificação de associado.');
-                    if(input) input.focus();
-                    return;
-                }
-
-                const r = await fetch('/api/amazon/settings',{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({tag})
-                });
-
-                const d = await r.json().catch(() => ({}));
-                if(!r.ok) throw new Error(d.detail || 'Erro ao salvar.');
-
-                setText(
-                    'amazonStatus',
-                    d.ok ? '🟢 Identificação Amazon salva.' : '❌ ' + (d.detail || 'Erro')
-                );
-            }catch(e){
-                setText('amazonStatus', '❌ ' + (e.message || 'Erro ao salvar identificação.'));
-            }
-        });
-
-        // Carregamentos iniciais independentes.
-        if(typeof loadProducts === 'function') loadProducts();
-        loadIntegrations();
-
-    }catch(error){
-        // Último mecanismo de segurança: a página continua utilizável.
-        setText('meliStatus', '⚠️ Interface carregada. Algumas funções precisam ser recarregadas.');
-        console.error('OFERTA IA inicialização:', error);
-    }
-});
-window.addEventListener('error', function(event){
-    try{
-        const status = document.getElementById('meliStatus');
-        if(status && event && event.message){
-            status.textContent = '⚠️ Interface: ' + event.message;
-        }
-    }catch(_){}
-});
-</script>
-</body>
-</html>"""
+function money(v){return v==null?'—':'R$ '+Number(v).toFixed(2).replace('.',',')}function esc(t){return String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function channels(){return [...document.querySelectorAll('#channelOptions input:checked')].map(x=>x.value)}
+function toggle(id,on){document.getElementById(id).classList.toggle('hidden',!on)}
+function opportunityCard(p,i){let s=Number(p.opportunity_score||0);let label=s>=90?'EXCELENTE OPORTUNIDADE':s>=80?'BOA OPORTUNIDADE':s>=70?'OPORTUNIDADE MODERADA':'ANALISAR';return `<div class="opportunity" id="opp-${i}"><span class="badge">⭐ ${s.toFixed(0)}/100 · ${label}</span><h3>${esc(p.name)}</h3><div class="muted">${esc(p.store||'Mercado Livre')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}<div class="offer-data"><div class="metric">Desconto<b>${p.discount_rate!=null?Number(p.discount_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Ranking<b>${p.rank_position?('#'+p.rank_position):'—'}</b></div><div class="metric">Confiança<b>${esc(p.data_confidence||'estimada')}</b></div></div>${p.image_url?`<img class="product-image" src="${esc(p.image_url)}" alt="">`:''}${p.url?`<a class="buy-btn" href="${esc(p.url)}" target="_blank" rel="noopener">🛒 Ver produto</a>`:''}<button class="approve-btn" onclick="approveOpportunity(${i})">✅ Aprovar e preparar oferta</button><button class="reject-btn" onclick="document.getElementById('opp-${i}').remove()">❌ Descartar</button></div>`}
+async function loadOpportunities(){let status=document.getElementById('opportunityStatus'),list=document.getElementById('opportunityList'),btn=document.getElementById('runOpportunities');btn.disabled=true;btn.textContent='⏳ Analisando oportunidades...';status.textContent='Consultando dados e ranqueando produtos...';try{let r=await fetch('/api/mercadolivre/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:document.getElementById('opportunityNiche').value.trim(),limit:Number(document.getElementById('opportunityLimit').value||10)})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha na descoberta.');window.currentOpportunities=d.items||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade encontrada com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.'}catch(e){status.textContent='⚠️ '+e.message}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
+async function searchProducts(){let q=document.getElementById('productSearch').value.trim(),out=document.getElementById('productResults'),status=document.getElementById('productSearchStatus');if(!q){status.textContent='Digite um produto ou nicho.';return}status.textContent='🔎 Pesquisando...';out.innerHTML='';try{let r=await fetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number(document.getElementById('productLimit').value||10)})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha na pesquisa.');let items=d.items||[];out.innerHTML=items.length?items.map((p,i)=>`<div class="product"><strong>${esc(p.name)}</strong><div class="muted">${esc(p.store||'Mercado Livre')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}${p.image_url?`<img class="product-image" src="${esc(p.image_url)}" alt="">`:''}${p.url?`<a class="buy-btn" href="${esc(p.url)}" target="_blank" rel="noopener">Ver produto</a>`:''}<button class="approve-btn" onclick="addProduct(${i})">➕ Adicionar ao OFERTA IA</button></div>`).join(''):'<div class="empty">Nenhum produto relevante encontrado.</div>';window.currentSearchProducts=items;status.textContent=`✅ ${items.length} produto(s) relevante(s) encontrado(s).`}catch(e){status.textContent='⚠️ '+e.message}}
+async function addProduct(i){let p=window.currentSearchProducts?.[i];if(!p)return;try{let r=await fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name,store:p.store||'Mercado Livre',url:p.url,category:p.category,current_price:p.current_price,old_price:p.old_price,image_url:p.image_url,marketplace:p.marketplace||'mercadolivre',item_id:p.item_id})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha ao salvar.');alert('Produto adicionado ao OFERTA IA.');loadProducts()}catch(e){alert(e.message)}}
+async function approveOpportunity(i){let p=window.currentOpportunities?.[i];if(!p)return;let ch=channels();if(!ch.length){alert('Selecione pelo menos um canal.');return}let box=document.getElementById('opp-'+i);box.insertAdjacentHTML('beforeend','<div class="offer-box">🤖 Gerando oferta com IA...</div>');try{let r=await fetch('/api/approve-and-publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:p,channels:ch})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha.');box.insertAdjacentHTML('beforeend','<div class="offer-box">✅ '+esc(d.message||'Oferta preparada.')+'</div>')}catch(e){box.insertAdjacentHTML('beforeend','<div class="offer-box">⚠️ '+esc(e.message)+'</div>')}}
+async function loadProducts(){try{let r=await fetch('/api/products');let d=await r.json();document.getElementById('products').textContent=d.length;document.getElementById('productList').innerHTML=d.length?d.map(p=>`<div class="product"><strong>${esc(p.name)}</strong><div class="muted">${esc(p.store||'')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div></div>`).join(''):'<div class="empty">Nenhum produto cadastrado ainda.</div>'}catch(e){}}
+async function importProduct(){let u=document.getElementById('productUrl').value.trim(),st=document.getElementById('importStatus');if(!u){st.textContent='Cole primeiro o link.';return}st.textContent='⏳ Buscando dados...';try{let r=await fetch('/api/import-product',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha.');let f=document.getElementById('productForm');for(let k of ['name','store','category','url','image_url','old_price','current_price'])if(d[k]!=null&&f[k])f[k].value=d[k];st.textContent='✅ Dados encontrados.'}catch(e){st.textContent='⚠️ '+e.message}}
+async function integrations(){try{let r=await fetch('/api/integrations/status');let d=await r.json();document.getElementById('meliStatus').textContent=d.mercadolivre?.connected?'🟢 Mercado Livre conectado.':'🟡 Mercado Livre não conectado.';document.getElementById('amazonStatus').textContent=d.amazon?.tag?'🟢 Identificação salva: '+d.amazon.tag:'Nenhuma identificação salva.';document.getElementById('amazonTag').value=d.amazon?.tag||''}catch(e){}}
+async function diagnostic(){let o=document.getElementById('meliDiagnostic');o.textContent='🔄 Diagnosticando...';try{let r=await fetch('/api/mercadolivre/diagnostico');let d=await r.json();o.innerHTML=(d.tests||[]).map(x=>(x.ok?'✅ ':'❌ ')+esc(x.name)+': HTTP '+esc(x.http_status)+'<br>'+esc(x.message)).join('<br>')}catch(e){o.textContent='⚠️ '+e.message}}
+document.addEventListener('DOMContentLoaded',()=>{document.getElementById('openOpportunities').onclick=()=>toggle('opportunitySection',true);document.getElementById('closeOpportunities').onclick=()=>toggle('opportunitySection',false);document.getElementById('openProducts').onclick=()=>toggle('productSection',true);document.getElementById('closeProducts').onclick=()=>toggle('productSection',false);document.getElementById('runOpportunities').onclick=loadOpportunities;document.getElementById('runProductSearch').onclick=searchProducts;document.getElementById('importBtn').onclick=importProduct;document.getElementById('meliConnectBtn').onclick=()=>location.href='/oauth/mercadolivre';document.getElementById('meliDiagnosticBtn').onclick=diagnostic;document.getElementById('amazonSaveBtn').onclick=async()=>{let tag=document.getElementById('amazonTag').value.trim();if(!tag)return;let r=await fetch('/api/amazon/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tag})});let d=await r.json();document.getElementById('amazonStatus').textContent=r.ok?'🟢 Identificação salva.':'⚠️ '+(d.detail||'Erro')};document.getElementById('productForm').onsubmit=async e=>{e.preventDefault();let f=new FormData(e.target),body={name:f.get('name'),store:f.get('store')||null,category:f.get('category')||null,url:f.get('url')||null,affiliate_url:f.get('affiliate_url')||null,old_price:f.get('old_price')?Number(f.get('old_price')):null,current_price:f.get('current_price')?Number(f.get('current_price')):null,image_url:f.get('image_url')||null};let id=e.target.dataset.editId;let r=await fetch(id?'/api/products/'+id:'/api/products',{method:id?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});let d=await r.json();if(!r.ok){alert(d.detail||'Erro');return}e.target.reset();delete e.target.dataset.editId;loadProducts();alert('Produto salvo com sucesso.')};loadProducts();integrations()})
+</script></body></html>"""
 
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -1648,283 +815,186 @@ def mercadolivre_search_diagnostic(q: str = "relogio"):
 
 
 def _norm_text(value):
-    import re
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9áéíóúãõç ]+", " ", str(value or "").lower())).strip()
+    import unicodedata
+    text = str(value or '').lower()
+    text = ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
+    text = re.sub(r'[^a-z0-9 ]+', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
 
-ACCESSORY_TERMS = {
-    "capa", "case", "pelicula", "película", "capinha", "cabo", "carregador",
-    "fonte", "adaptador", "suporte", "pulseira", "bracelete", "bateria", "dock"
-}
+
+def _tokens(value):
+    stop = {'de','da','do','das','dos','para','com','e','ou','mais','vendido','vendidos','promocao','oferta'}
+    return [x for x in _norm_text(value).split() if len(x) > 2 and x not in stop]
+
+
+def _relevance_score(query, title, category=''):
+    q = _tokens(query)
+    text = _norm_text(f'{title} {category}')
+    if not q:
+        return 0.0
+    hits = sum(1 for t in q if t in text)
+    score = hits / len(q)
+    # Correção simples para erros comuns como smartwach -> smartwatch.
+    if score == 0 and 'smartwach' in q and 'smartwatch' in text:
+        score = 0.85
+    return score
+
+
+ACCESSORY_TERMS = {'capa','case','pelicula','capinha','cabo','carregador','fonte','adaptador','suporte','pulseira','bracelete','bateria','dock'}
 
 def _looks_like_accessory(title):
-    words = set(_norm_text(title).split())
-    return bool(words & ACCESSORY_TERMS)
+    return bool(set(_tokens(title)) & ACCESSORY_TERMS)
+
 
 def _opportunity_score(p):
-    import math
     def n(v):
-        try:
-            return None if v in (None, "") else float(v)
-        except Exception:
-            return None
+        try: return None if v in (None,'') else float(v)
+        except Exception: return None
+    rank=n(p.get('rank_position'))
+    discount=n(p.get('discount_rate')) or 0
+    rating=n(p.get('rating')) or 0
+    competition=n(p.get('competition_index'))
+    rank_score = max(0, 100 - (rank-1)*5) if rank else 45
+    discount_score = min(100, discount*2.2)
+    rating_score = min(100, max(0,(rating-3)*25)) if rating else 60
+    competition_score = 100-min(100,max(0,competition)) if competition is not None else 50
+    data_score = 100 if p.get('data_confidence') == 'alta' else 70
+    completeness = sum(bool(p.get(k)) for k in ('current_price','url','image_url','item_id'))/4*100
+    return round(max(0,min(100,rank_score*.35 + competition_score*.20 + discount_score*.15 + rating_score*.10 + data_score*.10 + completeness*.10)),2)
 
-    sales = n(p.get("sales"))
-    rating = n(p.get("rating"))
-    disc = n(p.get("discount_rate"))
-    commission = n(p.get("commission_rate"))
-    competition = n(p.get("competition_index"))
-
-    demand = min(100, 20 + 20 * math.log10(max(1, sales))) if sales is not None else 45
-    commission_s = min(100, (commission or 0) * 5) if commission is not None else 35
-    discount_s = min(100, (disc or 0) * 2.2) if disc is not None else 25
-    rating_s = min(100, max(0, ((rating or 4) - 3) * 25)) if rating is not None else 60
-    competition_s = 100 - min(100, max(0, competition)) if competition is not None else 50
-
-    completeness = sum(bool(p.get(k)) for k in
-                       ("current_price", "url", "image_url", "item_id", "product_id")) / 5 * 100
-
-    return round(max(0, min(100,
-        demand * .30 +
-        competition_s * .25 +
-        commission_s * .15 +
-        discount_s * .10 +
-        70 * .05 +
-        rating_s * .05 +
-        completeness * .10
-    )), 2)
 
 def _opportunity_label(score):
-    if score >= 90: return "EXCELENTE OPORTUNIDADE"
-    if score >= 80: return "BOA OPORTUNIDADE"
-    if score >= 70: return "OPORTUNIDADE MODERADA"
-    return "ANALISAR"
+    if score >= 90: return 'EXCELENTE OPORTUNIDADE'
+    if score >= 80: return 'BOA OPORTUNIDADE'
+    if score >= 70: return 'OPORTUNIDADE MODERADA'
+    return 'ANALISAR'
 
-def _discovery_queries(niche):
-    n = _norm_text(niche)
-    if not n:
-        return [
-            "smartphone", "celular", "smartwatch", "fone bluetooth",
-            "televisão", "notebook", "monitor", "aspirador",
-            "air fryer", "cafeteira", "máquina de cortar cabelo",
-            "tênis", "beleza", "fitness", "casa"
-        ]
 
-    expansions = {
-        "iphone": ["iphone celular", "iphone smartphone"],
-        "smartwatch": ["smartwatch relógio inteligente", "relógio inteligente"],
-        "celular": ["celular smartphone", "smartphone"],
-        "relogio": ["relógio masculino", "relógio feminino", "smartwatch"],
-        "relógio": ["relógio masculino", "relógio feminino", "smartwatch"],
-        "eletronicos": ["eletrônicos", "smartphone", "smartwatch", "fone bluetooth", "notebook"],
-        "eletrônicos": ["eletrônicos", "smartphone", "smartwatch", "fone bluetooth", "notebook"],
-        "beleza": ["secador", "chapinha", "modelador", "máquina de cortar cabelo", "skincare"],
-        "fitness": ["smartwatch", "tênis corrida", "halter", "acessórios fitness"]
-    }
-    out = [n]
-    for key, vals in expansions.items():
-        if key in n:
-            out.extend(vals)
-    out.extend([f"{n} mais vendidos", f"{n} promoção"])
-    return list(dict.fromkeys(out))
+def _meli_headers(token):
+    return {'Authorization': f'Bearer {token}', 'User-Agent':'OFERTA-IA/6.0', 'Accept':'application/json'}
 
-def _inspect_discovery_product(access_token, item, query):
-    import requests
-    pid = item.get("id") or item.get("catalog_product_id")
-    if not pid:
-        return None
 
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "User-Agent": "OFERTA-IA/3.0",
-        "Accept": "application/json",
-    }
+def _meli_get(token, url, params=None, timeout=15):
+    r=requests.get(url,params=params,headers=_meli_headers(token),timeout=timeout)
+    if r.status_code in (401,403): return None,r.status_code
+    r.raise_for_status()
+    return r.json(),r.status_code
 
-    def get(url, params=None):
-        r = requests.get(url, params=params, timeout=12, headers=headers)
-        if r.status_code in (401, 403):
-            raise RuntimeError(f"Mercado Livre HTTP {r.status_code}")
-        r.raise_for_status()
-        return r.json()
 
+def _product_from_catalog(token, catalog_item, rank_position=None, query=''):
+    pid=catalog_item.get('id') or catalog_item.get('catalog_product_id')
+    if not pid: return None
     try:
-        detail = get(f"https://api.mercadolibre.com/products/{pid}")
-        winner = detail.get("buy_box_winner")
-        candidates = [winner] if isinstance(winner, dict) else []
-
+        detail,status=_meli_get(token,f'https://api.mercadolibre.com/products/{pid}',timeout=12)
+        if not detail: return None
+        winner=detail.get('buy_box_winner') if isinstance(detail,dict) else None
+        candidates=[winner] if isinstance(winner,dict) else []
         if not candidates:
-            try:
-                data = get(f"https://api.mercadolibre.com/products/{pid}/items", {"limit": 20})
-                if isinstance(data, dict):
-                    candidates = data.get("results") or data.get("items") or data.get("publications") or []
-                elif isinstance(data, list):
-                    candidates = data
-            except Exception:
-                candidates = []
-
-        best = None
+            data,_=_meli_get(token,f'https://api.mercadolibre.com/products/{pid}/items',{'limit':10},timeout=12)
+            if isinstance(data,dict): candidates=data.get('results') or data.get('items') or data.get('publications') or []
+            elif isinstance(data,list): candidates=data
+        best=None
         for c in candidates:
-            if not isinstance(c, dict):
-                continue
-            iid = c.get("item_id") or c.get("id")
-            price = None
-            try:
-                price = float(c.get("price"))
-            except Exception:
-                pass
-            title = c.get("title") or detail.get("name") or item.get("name")
-            if not iid or not price or price <= 0 or _looks_like_accessory(title):
-                continue
-            if best is None or price < float(best.get("price") or 10**12):
-                best = c
-
-        if not best:
-            return None
-
-        seller = best.get("seller") or {}
-        image = best.get("secure_thumbnail") or best.get("thumbnail")
+            if not isinstance(c,dict): continue
+            iid=c.get('item_id') or c.get('id'); price=c.get('price')
+            try: price=float(price)
+            except Exception: price=None
+            title=c.get('title') or detail.get('name') or catalog_item.get('name')
+            if iid and price and price>0 and not _looks_like_accessory(title):
+                if best is None or price < float(best.get('price') or 10**12): best=c
+        if not best: return None
+        old=best.get('original_price')
+        try: old=float(old) if old not in (None,'') else None
+        except Exception: old=None
+        cur=float(best.get('price'))
+        image=best.get('secure_thumbnail') or best.get('thumbnail')
         if not image:
-            pics = detail.get("pictures") or item.get("pictures") or []
-            if pics and isinstance(pics[0], dict):
-                image = pics[0].get("secure_url") or pics[0].get("url")
-
-        current = float(best.get("price"))
-        old = best.get("original_price")
-        try:
-            old = float(old) if old not in (None, "") else None
-        except Exception:
-            old = None
-
-        if old is None and isinstance(winner, dict):
-            try:
-                old = float(winner.get("original_price"))
-            except Exception:
-                old = None
-
-        p = {
-            "name": best.get("title") or detail.get("name") or item.get("name") or "Produto Mercado Livre",
-            "store": str(seller.get("nickname") or "Mercado Livre"),
-            "marketplace": "mercadolivre",
-            "product_id": pid,
-            "catalog_product_id": pid,
-            "item_id": best.get("item_id") or best.get("id"),
-            "seller_id": best.get("seller_id") or seller.get("id"),
-            "url": best.get("permalink") or detail.get("permalink") or item.get("permalink"),
-            "image_url": image,
-            "current_price": current,
-            "old_price": old,
-            "discount_rate": (
-                round((old-current)/old*100, 2) if old and old > current else None
-            ),
-            "buy_box_winner": bool(
-                isinstance(winner, dict) and
-                (best.get("item_id") or best.get("id")) == winner.get("item_id")
-            ),
-            "category": detail.get("domain_id") or item.get("domain_id"),
-            "sales": best.get("sold_quantity"),
-            "rating": best.get("rating"),
-            "condition": best.get("condition") or best.get("item_condition"),
-            "data_confidence": "alta",
-            "discovery_query": query,
-        }
-        p["opportunity_score"] = _opportunity_score(p)
-        p["opportunity_label"] = _opportunity_label(p["opportunity_score"])
+            pics=detail.get('pictures') or catalog_item.get('pictures') or []
+            if pics and isinstance(pics[0],dict): image=pics[0].get('secure_url') or pics[0].get('url')
+        p={'name':best.get('title') or detail.get('name') or catalog_item.get('name') or 'Produto Mercado Livre','store':str((best.get('seller') or {}).get('nickname') or 'Mercado Livre'),'marketplace':'mercadolivre','product_id':pid,'catalog_product_id':pid,'item_id':best.get('item_id') or best.get('id'),'seller_id':best.get('seller_id') or (best.get('seller') or {}).get('id'),'url':best.get('permalink') or detail.get('permalink') or catalog_item.get('permalink'),'image_url':image,'current_price':cur,'old_price':old,'discount_rate':round((old-cur)/old*100,2) if old and old>cur else None,'category':detail.get('domain_id') or catalog_item.get('domain_id'),'rating':best.get('rating'),'condition':best.get('condition') or best.get('item_condition'),'rank_position':rank_position,'discovery_query':query,'data_confidence':'alta'}
+        p['opportunity_score']=_opportunity_score(p);p['opportunity_label']=_opportunity_label(p['opportunity_score'])
         return p
     except Exception:
         return None
 
-@app.post("/api/mercadolivre/opportunities")
+
+@app.post('/api/mercadolivre/opportunities')
 def mercadolivre_opportunities(payload: dict):
-    """Motor principal do OFERTA IA: descobre oportunidades sem exigir produto."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    connection = _get_connection("mercadolivre")
-    access_token = (connection or {}).get("access_token")
-    if not access_token:
-        raise HTTPException(401, "Mercado Livre não está conectado.")
-
-    niche = (payload.get("niche") or "").strip()
-    try:
-        limit = max(5, min(30, int(payload.get("limit") or 20)))
-    except Exception:
-        limit = 20
-
-    queries = _discovery_queries(niche)
-    catalog = []
-    seen_catalog = set()
-
-    for q in queries:
+    """Modo OPORTUNIDADES: usa o ranking oficial /highlights e não exige produto."""
+    token=(_get_connection('mercadolivre') or {}).get('access_token')
+    if not token: raise HTTPException(401,'Mercado Livre não está conectado.')
+    niche=(payload.get('niche') or '').strip()
+    try: limit=max(5,min(30,int(payload.get('limit') or 10)))
+    except Exception: limit=10
+    catalog=[]; seen=set(); diagnostics={'highlights':0,'catalog_details':0,'products':0}
+    # Primeiro: rankings oficiais de mais vendidos. Quando há nicho, usamos tendências como ponte para localizar categorias/produtos do nicho.
+    categories=['MLB1000','MLB1055','MLB1246','MLB1430','MLB1574','MLB1276','MLB1144','MLB1132']
+    # IDs são apenas candidatos; se uma categoria não tiver highlights, seguimos sem erro.
+    for cat in categories:
         try:
-            data = requests.get(
-                "https://api.mercadolibre.com/products/search",
-                params={"status": "active", "site_id": "MLB", "q": q, "limit": 20},
-                timeout=18,
-                headers={
-                    "Authorization": f"Bearer {access_token}",
-                    "User-Agent": "OFERTA-IA/3.0",
-                    "Accept": "application/json",
-                },
-            )
-            if data.status_code in (401, 403):
-                continue
-            data.raise_for_status()
-            for x in (data.json().get("results") or []):
-                pid = x.get("id") or x.get("catalog_product_id")
-                if pid and pid not in seen_catalog:
-                    seen_catalog.add(pid)
-                    catalog.append((x, q))
-        except Exception:
-            continue
-
-    products = []
-    seen_items = set()
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [
-            pool.submit(_inspect_discovery_product, access_token, x, q)
-            for x, q in catalog[:120]
-        ]
-        for f in as_completed(futures):
+            data,status=_meli_get(token,f'https://api.mercadolibre.com/highlights/MLB/category/{cat}',timeout=10)
+            if not data: continue
+            diagnostics['highlights']+=1
+            for x in data.get('content') or []:
+                if x.get('type') not in ('PRODUCT','ITEM','USER_PRODUCT'): continue
+                iid=x.get('id'); pos=x.get('position')
+                key=(iid,pos)
+                if iid and key not in seen: seen.add(key); catalog.append(({'id':iid},pos,'highlights'))
+        except Exception: continue
+    # Fallback/expansão por tendências + catálogo, principalmente para nichos.
+    if niche or len(catalog)<10:
+        queries=[niche] if niche else ['smartphone','smartwatch','fone bluetooth','air fryer','notebook','televisao','beleza','fitness','casa']
+        try:
+            trends,status=_meli_get(token,'https://api.mercadolibre.com/trends/MLB',timeout=12)
+            if isinstance(trends,list): queries += [str(x.get('keyword')) for x in trends[:20] if isinstance(x,dict) and x.get('keyword')]
+        except Exception: pass
+        for q in list(dict.fromkeys([x for x in queries if x]))[:30]:
             try:
-                p = f.result()
-            except Exception:
-                p = None
-            if p and p.get("item_id") not in seen_items:
-                seen_items.add(p["item_id"])
-                products.append(p)
+                data,status=_meli_get(token,'https://api.mercadolibre.com/products/search',{'status':'active','site_id':'MLB','q':q,'limit':12},timeout=12)
+                for x in (data or {}).get('results') or []:
+                    pid=x.get('id')
+                    if pid and pid not in seen: seen.add(pid); catalog.append((x,None,q))
+            except Exception: continue
+    from concurrent.futures import ThreadPoolExecutor,as_completed
+    products=[]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futs=[pool.submit(_product_from_catalog,token,x,pos,q) for x,pos,q in catalog[:100]]
+        for f in as_completed(futs):
+            try:
+                p=f.result()
+                if p: products.append(p); diagnostics['products']+=1
+            except Exception: pass
+    if niche:
+        products=[p for p in products if _relevance_score(niche,p.get('name',''),p.get('category',''))>=0.5]
+    uniq={p.get('item_id') or p.get('product_id'):p for p in products if p.get('item_id') or p.get('product_id')}
+    products=list(uniq.values()); products.sort(key=lambda p:(-float(p.get('opportunity_score') or 0), float(p.get('rank_position') or 999), -float(p.get('discount_rate') or 0)))
+    selected=products[:limit]
+    return {'mode':'opportunities','niche':niche or 'todos','items':selected,'returned':len(selected),'diagnostic':diagnostics,'message':f'Foram analisados {len(products)} produtos e selecionadas {len(selected)} oportunidades.' if selected else 'Não foram encontradas oportunidades com dados atuais suficientes.'}
 
-    products.sort(key=lambda p: (
-        -float(p.get("opportunity_score") or 0),
-        -float(p.get("discount_rate") or 0)
-    ))
 
-    selected = [p for p in products if float(p.get("opportunity_score") or 0) >= 70]
-    selected = (selected or products)[:limit]
-
-    return {
-        "mode": "automatic_discovery",
-        "niche": niche or "todos",
-        "queries_used": queries,
-        "catalog_candidates": len(catalog),
-        "products_analyzed": len(products),
-        "returned": len(selected),
-        "items": selected,
-        "message": (
-            f"Foram analisados {len(products)} produtos e selecionadas {len(selected)} oportunidades."
-            if selected else
-            "Não foram encontradas oportunidades com dados atuais suficientes."
-        ),
-    }
-
-@app.post("/api/mercadolivre/search")
+@app.post('/api/mercadolivre/search')
 def mercadolivre_search(payload: dict):
-    """Pesquisa específica/secundária: produto ou nicho."""
-    query = (payload.get("query") or "").strip()
-    if not query:
-        raise HTTPException(400, "Informe um produto ou nicho.")
-    return mercadolivre_opportunities({
-        "niche": query,
-        "limit": payload.get("limit", 10)
-    })
+    """Modo PRODUTOS: pesquisa específica, sem score/ranking de oportunidades."""
+    token=(_get_connection('mercadolivre') or {}).get('access_token')
+    if not token: raise HTTPException(401,'Mercado Livre não está conectado.')
+    query=(payload.get('query') or '').strip()
+    if not query: raise HTTPException(400,'Informe um produto ou nicho.')
+    try: limit=max(1,min(20,int(payload.get('limit') or 10)))
+    except Exception: limit=10
+    try:
+        data,status=_meli_get(token,'https://api.mercadolibre.com/products/search',{'status':'active','site_id':'MLB','q':query,'limit':30},timeout=18)
+    except Exception as exc: raise HTTPException(502,f'Falha na pesquisa do catálogo: {exc}')
+    raw=(data or {}).get('results') or []; candidates=[]
+    for x in raw:
+        rel=_relevance_score(query,x.get('name') or x.get('title') or '',x.get('domain_id') or '')
+        if rel<0.5: continue
+        p=_product_from_catalog(token,x,None,query)
+        if p:
+            rel2=_relevance_score(query,p.get('name',''),p.get('category',''))
+            if rel2>=0.5: p.pop('opportunity_score',None);p.pop('opportunity_label',None);p['relevance_score']=round(rel2,2);candidates.append(p)
+    candidates.sort(key=lambda p:-float(p.get('relevance_score') or 0))
+    return {'mode':'products','query':query,'items':candidates[:limit],'returned':min(limit,len(candidates)),'message':f'{min(limit,len(candidates))} produto(s) relevante(s) encontrado(s).'}
+
 
 @app.get("/api/products")
 def products():
