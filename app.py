@@ -82,13 +82,13 @@ HTML = """<!doctype html>
 function money(v){return v==null?'—':'R$ '+Number(v).toFixed(2).replace('.',',')}function esc(t){return String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function channels(){return [...document.querySelectorAll('#channelOptions input:checked')].map(x=>x.value)}
 function toggle(id,on){document.getElementById(id).classList.toggle('hidden',!on)}
-function productUrl(p){const u=String(p?.url||'');if(/^https?:\/\//i.test(u)&&!u.includes('oferta-ia.onrender.com'))return u;if(p?.item_id&&String(p.item_id).startsWith('MLB'))return 'https://www.mercadolivre.com.br/'+p.item_id;if(p?.catalog_product_id)return 'https://www.mercadolivre.com.br/p/'+p.catalog_product_id;return 'https://www.mercadolivre.com.br/'}
+function productUrl(p){const u=String(p?.url||'');if(/^https?:\/\//i.test(u)&&!u.includes('oferta-ia.onrender.com'))return u;return ''}
 function opportunityCard(p,i){let s=Number(p.opportunity_score||0);let label=s>=90?'EXCELENTE OPORTUNIDADE':s>=80?'BOA OPORTUNIDADE':s>=70?'OPORTUNIDADE MODERADA':'ANALISAR';return `<div class="opportunity" id="opp-${i}"><div class="topline"><span class="badge">⭐ ${s.toFixed(0)}/100</span><span class="tag">${label}</span></div>${p.image_url?`<img class="product-image" src="${esc(p.image_url)}" alt="" loading="lazy">`:''}<h3>${esc(p.name)}</h3><div class="muted">${esc(p.store||'Mercado Livre')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}<div class="offer-data"><div class="metric">Desconto<b>${p.discount_rate!=null?Number(p.discount_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Ranking<b>${p.rank_position?('#'+p.rank_position):'—'}</b></div><div class="metric">Confiança<b>${esc(p.data_confidence||'estimada')}</b></div></div><div class="actions"><a class="buy-btn" href="${esc(productUrl(p))}" target="_blank" rel="noopener noreferrer">🛒 Ver produto</a><button class="approve-btn" onclick="approveOpportunity(${i})">✅ Aprovar</button></div><button class="reject-btn" onclick="document.getElementById('opp-${i}').remove()">❌ Descartar</button></div>`}
 async function loadOpportunities(){let status=document.getElementById('opportunityStatus'),list=document.getElementById('opportunityList'),btn=document.getElementById('runOpportunities');btn.disabled=true;btn.textContent='⏳ Analisando oportunidades...';status.textContent='Validando conexão e consultando oportunidades...';try{let conn=await fetch('/api/integrations/status',{cache:'no-store'}),cd=await conn.json();if(!cd.mercadolivre?.connected)throw Error(cd.mercadolivre?.message||'Conecte o Mercado Livre antes de procurar oportunidades.');let r=await fetch('/api/mercadolivre/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:document.getElementById('opportunityNiche').value.trim(),limit:Number(document.getElementById('opportunityLimit').value||10)})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha na descoberta.');window.currentOpportunities=d.items||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade encontrada com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.'}catch(e){status.textContent='⚠️ '+e.message}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
 async function searchProducts(){let q=document.getElementById('productSearch').value.trim(),out=document.getElementById('productResults'),status=document.getElementById('productSearchStatus');if(!q){status.textContent='Digite um produto ou nicho.';return}status.textContent='🔎 Pesquisando...';out.innerHTML='';try{let conn=await fetch('/api/integrations/status',{cache:'no-store'}),cd=await conn.json();if(!cd.mercadolivre?.connected)throw Error(cd.mercadolivre?.message||'Conecte o Mercado Livre antes de pesquisar.');let r=await fetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number(document.getElementById('productLimit').value||10)})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha na pesquisa.');let items=d.items||[];out.innerHTML=items.length?items.map((p,i)=>`<div class="product"><strong>${esc(p.name)}</strong><div class="muted">${esc(p.store||'Mercado Livre')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}${p.image_url?`<img class="product-image" src="${esc(p.image_url)}" alt="">`:''}${p.url?`<a class="buy-btn" href="${esc(p.url)}" target="_blank" rel="noopener">Ver produto</a>`:''}<button class="approve-btn" onclick="addProduct(${i})">➕ Adicionar ao OFERTA IA</button></div>`).join(''):'<div class="empty">Nenhum produto relevante encontrado.</div>';window.currentSearchProducts=items;status.textContent=`✅ ${items.length} produto(s) relevante(s) encontrado(s).`}catch(e){status.textContent='⚠️ '+e.message}}
 async function addProduct(i){let p=window.currentSearchProducts?.[i];if(!p)return;try{let r=await fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name,store:p.store||'Mercado Livre',url:p.url,category:p.category,current_price:p.current_price,old_price:p.old_price,image_url:p.image_url,marketplace:p.marketplace||'mercadolivre',item_id:p.item_id})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha ao salvar.');alert('Produto adicionado ao OFERTA IA.');loadProducts()}catch(e){alert(e.message)}}
 async function approveOpportunity(i){let p=window.currentOpportunities?.[i];if(!p)return;let box=document.getElementById('opp-'+i),btn=box.querySelector('.approve-btn');btn.disabled=true;btn.textContent='⏳ Salvando...';try{let r=await fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...p,affiliate_url:p.affiliate_url||null})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Não foi possível salvar.');btn.textContent='✅ Aprovado e salvo';box.insertAdjacentHTML('beforeend','<div class="offer-box success">Produto aprovado e salvo em <b>Meus produtos</b>. O próximo passo será vincular o link de afiliado e gerar a oferta com IA.</div>');loadProducts();}catch(e){btn.disabled=false;btn.textContent='✅ Aprovar';box.insertAdjacentHTML('beforeend','<div class="offer-box error">⚠️ '+esc(e.message)+'</div>')}}
-async function loadProducts(){try{let r=await fetch('/api/products');let d=await r.json();document.getElementById('products').textContent=d.length;document.getElementById('productList').innerHTML=d.length?d.map(p=>`<div class="product"><strong>${esc(p.name)}</strong><div class="muted">${esc(p.store||'')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div></div>`).join(''):'<div class="empty">Nenhum produto cadastrado ainda.</div>'}catch(e){}}
+async function loadProducts(){try{await fetch('/api/products/refresh-prices',{method:'POST'}).catch(()=>{});let r=await fetch('/api/products');let d=await r.json();document.getElementById('products').textContent=d.length;document.getElementById('productList').innerHTML=d.length?d.map(p=>`<div class="product"><strong>${esc(p.name)}</strong><div class="muted">${esc(p.store||'')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}${p.url?`<a class="buy-btn" href="${esc(p.url)}" target="_blank" rel="noopener">🛒 Ver produto</a>`:''}</div>`).join(''):'<div class="empty">Nenhum produto cadastrado ainda.</div>'}catch(e){}}
 async function importProduct(){let u=document.getElementById('productUrl').value.trim(),st=document.getElementById('importStatus');if(!u){st.textContent='Cole primeiro o link.';return}st.textContent='⏳ Buscando dados...';try{let r=await fetch('/api/import-product',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha.');let f=document.getElementById('productForm');for(let k of ['name','store','category','url','image_url','old_price','current_price'])if(d[k]!=null&&f[k])f[k].value=d[k];st.textContent='✅ Dados encontrados.'}catch(e){st.textContent='⚠️ '+e.message}}
 async function integrations(){let el=document.getElementById('meliStatus'),btn=document.getElementById('meliConnectBtn');el.textContent='🔄 Validando conexão real...';try{let r=await fetch('/api/integrations/status',{cache:'no-store'}),d=await r.json(),m=d.mercadolivre||{};if(m.connected){el.innerHTML='🟢 <b>Mercado Livre conectado</b><br><span class="muted">Conexão validada pelo servidor.</span>';btn.textContent='🔄 Reconectar Mercado Livre';}else{el.innerHTML='🔴 <b>'+esc(m.message||'Mercado Livre não conectado.')+'</b><br><span class="muted">A pesquisa ficará bloqueada até a conexão ser válida.</span>';btn.textContent='🔐 Conectar Mercado Livre';}document.getElementById('amazonStatus').textContent=d.amazon?.tag?'🟢 Identificação salva: '+esc(d.amazon.tag):'Nenhuma identificação salva.';document.getElementById('amazonTag').value=d.amazon?.tag||''}catch(e){el.textContent='⚠️ Não foi possível validar a conexão.'}}
 async function diagnostic(){let o=document.getElementById('meliDiagnostic');o.textContent='🔄 Diagnosticando...';try{let r=await fetch('/api/mercadolivre/diagnostico');let d=await r.json();o.innerHTML=(d.tests||[]).map(x=>(x.ok?'✅ ':'❌ ')+esc(x.name)+': HTTP '+esc(x.http_status)+'<br>'+esc(x.message)).join('<br>')}catch(e){o.textContent='⚠️ '+e.message}}
@@ -947,10 +947,6 @@ def _best_product_url(item):
     url=item.get('permalink') or item.get('url')
     if isinstance(url,str) and url.startswith(('http://','https://')) and 'oferta-ia.onrender.com' not in urlparse(url).netloc.lower():
         return url
-    iid=item.get('item_id') or item.get('id')
-    if iid and str(iid).startswith('MLB'): return 'https://www.mercadolivre.com.br/'+str(iid)
-    pid=item.get('catalog_product_id') or item.get('product_id') or item.get('id')
-    if pid: return f'https://www.mercadolivre.com.br/p/{pid}'
     return None
 
 
@@ -984,7 +980,28 @@ def _product_from_catalog(token, catalog_item, rank_position=None, query=''):
         if not image:
             pics=detail.get('pictures') or catalog_item.get('pictures') or []
             if pics and isinstance(pics[0],dict): image=pics[0].get('secure_url') or pics[0].get('url')
-        p={'name':best.get('title') or detail.get('name') or catalog_item.get('name') or 'Produto Mercado Livre','store':str((best.get('seller') or {}).get('nickname') or 'Mercado Livre'),'marketplace':'mercadolivre','product_id':pid,'catalog_product_id':pid,'item_id':best.get('item_id') or best.get('id'),'seller_id':best.get('seller_id') or (best.get('seller') or {}).get('id'),'url':_best_product_url({**best,'catalog_product_id':pid}) or _best_product_url(detail) or _best_product_url(catalog_item),'image_url':image,'current_price':cur,'old_price':old,'discount_rate':round((old-cur)/old*100,2) if old and old>cur else None,'category':detail.get('domain_id') or catalog_item.get('domain_id'),'rating':best.get('rating'),'condition':best.get('condition') or best.get('item_condition'),'rank_position':rank_position,'discovery_query':query,'data_confidence':'alta'}
+        item_id = best.get('item_id') or best.get('id')
+        item_permalink = best.get('permalink')
+        # A URL de /products/{id} é uma PDP de catálogo e não deve ser usada
+        # como link principal de compra quando já temos um anúncio (item_id).
+        # Busca os dados do anúncio real para obter permalink e preços atuais.
+        if item_id:
+            try:
+                item_data, _ = _meli_get(token, f'https://api.mercadolibre.com/items/{item_id}', timeout=8)
+                if isinstance(item_data, dict):
+                    item_permalink = item_data.get('permalink') or item_permalink
+                    if item_data.get('price') is not None:
+                        cur = _price_number(item_data.get('price')) or cur
+                    if item_data.get('original_price') is not None:
+                        old = _price_number(item_data.get('original_price')) or old
+                    if not image:
+                        image = item_data.get('secure_thumbnail') or item_data.get('thumbnail')
+            except Exception:
+                pass
+        # Sem anúncio real, não fabricamos URL. A PDP do catálogo só é usada como
+        # último recurso quando ela própria foi retornada pelo Mercado Livre.
+        real_url = item_permalink or detail.get('permalink') or catalog_item.get('permalink')
+        p={'name':best.get('title') or detail.get('name') or catalog_item.get('name') or 'Produto Mercado Livre','store':str((best.get('seller') or {}).get('nickname') or 'Mercado Livre'),'marketplace':'mercadolivre','product_id':pid,'catalog_product_id':pid,'item_id':item_id,'seller_id':best.get('seller_id') or (best.get('seller') or {}).get('id'),'url':real_url,'image_url':image,'current_price':cur,'old_price':old,'discount_rate':round((old-cur)/old*100,2) if old and cur is not None and old>cur else None,'category':detail.get('domain_id') or catalog_item.get('domain_id'),'rating':best.get('rating'),'condition':best.get('condition') or best.get('item_condition'),'rank_position':rank_position,'discovery_query':query,'data_confidence':'alta'}
         p['opportunity_score']=_opportunity_score(p);p['opportunity_label']=_opportunity_label(p['opportunity_score'])
         return p
     except Exception:
@@ -993,56 +1010,96 @@ def _product_from_catalog(token, catalog_item, rank_position=None, query=''):
 
 @app.post('/api/mercadolivre/opportunities')
 def mercadolivre_opportunities(payload: dict):
-    """Modo OPORTUNIDADES: usa o ranking oficial /highlights e não exige produto."""
+    """Modo OPORTUNIDADES otimizado: reduz chamadas sequenciais sem perder o ranking."""
     token=_meli_token()
-    if not token: raise HTTPException(401,'Mercado Livre não está conectado ou a conexão expirou. Abra Conexões e reconecte.')
+    if not token:
+        raise HTTPException(401,'Mercado Livre não está conectado ou a conexão expirou. Abra Conexões e reconecte.')
     niche=(payload.get('niche') or '').strip()
-    try: limit=max(5,min(30,int(payload.get('limit') or 10)))
-    except Exception: limit=10
-    catalog=[]; seen=set(); diagnostics={'highlights':0,'catalog_details':0,'products':0}
-    # Primeiro: rankings oficiais de mais vendidos. Quando há nicho, usamos tendências como ponte para localizar categorias/produtos do nicho.
+    try:
+        limit=max(5,min(30,int(payload.get('limit') or 10)))
+    except Exception:
+        limit=10
+
+    from concurrent.futures import ThreadPoolExecutor,as_completed
     categories=['MLB1000','MLB1055','MLB1246','MLB1430','MLB1574','MLB1276','MLB1144','MLB1132']
-    # IDs são apenas candidatos; se uma categoria não tiver highlights, seguimos sem erro.
-    for cat in categories:
+    catalog=[]; seen=set(); diagnostics={'highlights':0,'catalog_details':0,'products':0}
+
+    # V8.1 fazia estas 8 chamadas uma após outra. Agora são simultâneas.
+    def fetch_highlight(cat):
         try:
-            data,status=_meli_get(token,f'https://api.mercadolibre.com/highlights/MLB/category/{cat}',timeout=10)
+            data,status=_meli_get(token,f'https://api.mercadolibre.com/highlights/MLB/category/{cat}',timeout=7)
+            return cat,data
+        except Exception:
+            return cat,None
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for cat,data in pool.map(fetch_highlight,categories):
             if not data: continue
             diagnostics['highlights']+=1
             for x in data.get('content') or []:
                 if x.get('type') not in ('PRODUCT','ITEM','USER_PRODUCT'): continue
                 iid=x.get('id'); pos=x.get('position')
                 key=(iid,pos)
-                if iid and key not in seen: seen.add(key); catalog.append(({'id':iid},pos,'highlights'))
-        except Exception: continue
-    # Fallback/expansão por tendências + catálogo, principalmente para nichos.
-    if niche or len(catalog)<10:
-        queries=[niche] if niche else ['smartphone','smartwatch','fone bluetooth','air fryer','notebook','televisao','beleza','fitness','casa']
+                if iid and key not in seen:
+                    seen.add(key); catalog.append(({'id':iid},pos,'highlights'))
+
+    # Pesquisa direcionada somente quando o usuário informou um nicho.
+    if niche:
         try:
-            trends,status=_meli_get(token,'https://api.mercadolibre.com/trends/MLB',timeout=12)
-            if isinstance(trends,list): queries += [str(x.get('keyword')) for x in trends[:20] if isinstance(x,dict) and x.get('keyword')]
-        except Exception: pass
-        for q in list(dict.fromkeys([x for x in queries if x]))[:30]:
-            try:
-                data,status=_meli_get(token,'https://api.mercadolibre.com/products/search',{'status':'active','site_id':'MLB','q':q,'limit':12},timeout=12)
-                for x in (data or {}).get('results') or []:
-                    pid=x.get('id')
-                    if pid and pid not in seen: seen.add(pid); catalog.append((x,None,q))
-            except Exception: continue
-    from concurrent.futures import ThreadPoolExecutor,as_completed
+            data,status=_meli_get(token,'https://api.mercadolibre.com/products/search',
+                {'status':'active','site_id':'MLB','q':niche,'limit':20},timeout=8)
+            for x in (data or {}).get('results') or []:
+                pid=x.get('id')
+                if pid and pid not in seen:
+                    seen.add(pid); catalog.append((x,None,niche))
+        except Exception:
+            pass
+    # Sem nicho, o ranking já é a fonte principal. Trends só entra se faltarem candidatos.
+    elif len(catalog)<max(10,limit):
+        try:
+            trends,status=_meli_get(token,'https://api.mercadolibre.com/trends/MLB',timeout=8)
+            trend_list=trends if isinstance(trends,list) else []
+            def fetch_trend(t):
+                q=str(t.get('keyword') or '').strip() if isinstance(t,dict) else ''
+                if not q: return []
+                try:
+                    data,status=_meli_get(token,'https://api.mercadolibre.com/products/search',
+                        {'status':'active','site_id':'MLB','q':q,'limit':6},timeout=6)
+                    return [(x,None,q) for x in ((data or {}).get('results') or []) if x.get('id')]
+                except Exception:
+                    return []
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                for rows in pool.map(fetch_trend,trend_list[:5]):
+                    for x,pos,q in rows:
+                        pid=x.get('id')
+                        if pid and pid not in seen:
+                            seen.add(pid); catalog.append((x,pos,q))
+                            if len(catalog)>=max(24,limit*2): break
+                    if len(catalog)>=max(24,limit*2): break
+        except Exception:
+            pass
+
+    # Só detalha uma pequena janela dos melhores candidatos.
+    candidate_cap=max(24,min(48,limit*4))
     products=[]
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futs=[pool.submit(_product_from_catalog,token,x,pos,q) for x,pos,q in catalog[:100]]
+        futs=[pool.submit(_product_from_catalog,token,x,pos,q) for x,pos,q in catalog[:candidate_cap]]
         for f in as_completed(futs):
             try:
                 p=f.result()
-                if p: products.append(p); diagnostics['products']+=1
-            except Exception: pass
+                if p:
+                    products.append(p); diagnostics['products']+=1
+            except Exception:
+                pass
+
     if niche:
         products=[p for p in products if _relevance_score(niche,p.get('name',''),p.get('category',''))>=0.5]
     uniq={p.get('item_id') or p.get('product_id'):p for p in products if p.get('item_id') or p.get('product_id')}
-    products=list(uniq.values()); products.sort(key=lambda p:(-float(p.get('opportunity_score') or 0), float(p.get('rank_position') or 999), -float(p.get('discount_rate') or 0)))
+    products=list(uniq.values())
+    products.sort(key=lambda p:(-float(p.get('opportunity_score') or 0),float(p.get('rank_position') or 999),-float(p.get('discount_rate') or 0)))
     selected=products[:limit]
-    return {'mode':'opportunities','niche':niche or 'todos','items':selected,'returned':len(selected),'diagnostic':diagnostics,'message':f'Foram analisados {len(products)} produtos e selecionadas {len(selected)} oportunidades.' if selected else 'Não foram encontradas oportunidades com dados atuais suficientes.'}
+    return {'mode':'opportunities','niche':niche or 'todos','items':selected,'returned':len(selected),'diagnostic':diagnostics,
+            'message':f'Foram analisados {len(products)} produtos e selecionadas {len(selected)} oportunidades.' if selected else 'Não foram encontradas oportunidades com dados atuais suficientes.'}
 
 
 @app.post('/api/mercadolivre/search')
@@ -1094,7 +1151,7 @@ def mercadolivre_search(payload: dict):
                         'store':'Mercado Livre',
                         'marketplace':'mercadolivre',
                         'catalog_product_id':pid,
-                        'url':f'https://www.mercadolivre.com.br/p/{pid}',
+                        'url':None,
                         'image_url':((x.get('pictures') or [{}])[0].get('url')
                                      if isinstance((x.get('pictures') or [{}])[0],dict) else None),
                         'category':x.get('domain_id'),
@@ -1120,6 +1177,48 @@ def mercadolivre_search(payload: dict):
     selected=candidates[:limit]
     return {'mode':'products','query':query,'items':selected,'returned':len(selected),
             'message':f'{len(selected)} produto(s) relevante(s) encontrado(s).'}
+
+
+@app.post("/api/products/refresh-prices")
+def refresh_product_prices():
+    """Atualiza preços e links dos produtos Mercado Livre já salvos."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    rows = supabase.table("products").select("*").eq("marketplace", "mercadolivre").limit(200).execute().data or []
+    token = _meli_token()
+    if not token:
+        raise HTTPException(401, "Mercado Livre não está conectado ou a conexão expirou.")
+    def refresh(row):
+        iid = row.get("item_id")
+        if not iid: return row, False
+        try:
+            item, _ = _meli_get(token, f"https://api.mercadolibre.com/items/{iid}", timeout=8)
+            if not isinstance(item, dict): return row, False
+            update = {}
+            price = _price_number(item.get("price"))
+            original = _price_number(item.get("original_price"))
+            permalink = item.get("permalink")
+            image = item.get("secure_thumbnail") or item.get("thumbnail")
+            if price is not None: update["current_price"] = price
+            if original is not None: update["old_price"] = original
+            if original and price is not None and original > price:
+                update["discount_rate"] = round((original-price)/original*100,2)
+            if permalink: update["url"] = permalink
+            if image: update["image_url"] = image
+            if update:
+                saved = supabase.table("products").update(update).eq("id", row.get("id")).execute().data or []
+                return (saved[0] if saved else {**row, **update}), True
+        except Exception:
+            pass
+        return row, False
+    updated=0
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures=[pool.submit(refresh,row) for row in rows]
+        for f in as_completed(futures):
+            try:
+                _, ok=f.result()
+                updated += 1 if ok else 0
+            except Exception: pass
+    return {"ok":True,"total":len(rows),"updated":updated,"message":f"{updated} produto(s) atualizado(s)."}
 
 
 @app.get("/api/products")
