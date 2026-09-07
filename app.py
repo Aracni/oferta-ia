@@ -1648,12 +1648,13 @@ def mercadolivre_search_diagnostic(q: str = "relogio"):
 
 @app.post("/api/mercadolivre/search")
 def mercadolivre_search(payload: dict):
-    """Busca no catálogo e transforma PDPs em ofertas reais.
+    """Busca produtos do catálogo e obtém a oferta atual.
 
-    Importante: /items/{item_id} NÃO é obrigatório aqui. Para uma conta de
-    afiliado ele pode não expor todos os campos de estoque/vendas do anúncio.
-    A fonte principal de publicações é /products/{product_id}/items, que lista
-    as publicações concorrentes do produto de catálogo.
+    Estratégia V4.2:
+    1) /products/search encontra PDPs do catálogo.
+    2) /products/{id} é a fonte principal: seu buy_box_winner já traz item_id e preço atual.
+    3) Somente quando não houver buy_box_winner tentamos /products/{id}/items.
+    4) Não exigimos /items/{item_id}, estoque ou vendas do proprietário.
     """
     query = (payload.get("query") or "").strip()
     try:
@@ -1670,7 +1671,7 @@ def mercadolivre_search(payload: dict):
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "User-Agent": "OFERTA-IA/2.0",
+        "User-Agent": "OFERTA-IA/2.1",
         "Accept": "application/json",
     }
 
@@ -1679,17 +1680,17 @@ def mercadolivre_search(payload: dict):
         if r.status_code == 404 and allow_404:
             return None, r.status_code, ""
         if r.status_code in (401, 403):
-            body = r.text[:700]
-            raise HTTPException(502, f"Mercado Livre recusou a consulta ({r.status_code}). {body}")
+            return None, r.status_code, r.text[:700]
         r.raise_for_status()
         try:
             return r.json(), r.status_code, ""
         except ValueError:
-            raise HTTPException(502, "O Mercado Livre retornou JSON inválido.")
+            return None, r.status_code, "JSON inválido"
 
     def num(v):
         try:
-            if v is None or v == "": return None
+            if v is None or v == "":
+                return None
             return float(v)
         except (TypeError, ValueError):
             return None
@@ -1701,17 +1702,19 @@ def mercadolivre_search(payload: dict):
         return None
 
     try:
-        # Pegamos candidatos suficientes para compensar PDPs sem publicações.
-        search, _, _ = get_json(
+        # Busca candidatos do catálogo. Mantemos uma margem porque alguns PDPs não têm vencedor.
+        search, search_status, search_error = get_json(
             "https://api.mercadolibre.com/products/search",
             {"status":"active", "site_id":"MLB", "q":query,
-             "limit":min(30, max(12, limit * 2))},
+             "limit":min(30, max(15, limit * 2))},
             timeout=18,
         )
-        raw = (search or {}).get("results") or []
-        raw = raw[:min(30, max(12, limit * 2))]
+        if search is None:
+            detail = search_error or ""
+            raise HTTPException(502, f"Falha na busca do catálogo ({search_status}). {detail}")
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        raw = (search or {}).get("results") or []
+        raw = raw[:min(30, max(15, limit * 2))]
 
         stats = {
             "catalog_candidates": len(raw),
@@ -1720,6 +1723,8 @@ def mercadolivre_search(payload: dict):
             "products_without_publications": 0,
             "products_without_price": 0,
             "errors": 0,
+            "buy_box_used": 0,
+            "items_endpoint_used": 0,
         }
 
         def inspect_catalog(x):
@@ -1727,55 +1732,80 @@ def mercadolivre_search(payload: dict):
             if not product_id:
                 return None, "no_id"
             try:
-                detail, _, _ = get_json(
+                detail, status, err = get_json(
                     f"https://api.mercadolibre.com/products/{product_id}",
                     timeout=10, allow_404=True
                 )
                 if not detail:
-                    return None, "detail_404"
-                status = str(detail.get("status") or x.get("status") or "").lower()
-                if status and status != "active":
+                    return {"error": err or f"HTTP {status}"}, "error"
+
+                product_status = str(detail.get("status") or x.get("status") or "").lower()
+                if product_status and product_status != "active":
                     return None, "inactive"
 
-                listings, _, _ = get_json(
-                    f"https://api.mercadolibre.com/products/{product_id}/items",
-                    {"limit":10}, timeout=10, allow_404=True
-                )
-                listings = listings or {}
-                candidates = listings.get("results") or []
+                # PRIMEIRO CAMINHO: o próprio detalhe do PDP pode trazer a publicação vencedora.
+                winner = detail.get("buy_box_winner")
+                if isinstance(winner, dict):
+                    winner_id = winner.get("item_id") or winner.get("id")
+                    winner_price = num(winner.get("price"))
+                    if winner_id and winner_price is not None and winner_price > 0:
+                        return {
+                            "detail": detail,
+                            "source": x,
+                            "candidates": [winner],
+                            "source_type": "buy_box",
+                        }, "ok"
 
-                # Buy Box é um ótimo candidato, mas não é requisito.
-                winner = detail.get("buy_box_winner") or {}
-                if winner.get("item_id") and not any(
-                    (c.get("item_id") or c.get("id")) == winner.get("item_id")
-                    for c in candidates
-                ):
-                    candidates.insert(0, winner)
+                # SEGUNDO CAMINHO: lista de publicações concorrentes.
+                listings, list_status, list_err = get_json(
+                    f"https://api.mercadolibre.com/products/{product_id}/items",
+                    {"limit":20}, timeout=10, allow_404=True
+                )
+                if listings is None:
+                    # Não transformamos um 403/404 deste endpoint em falha do produto.
+                    return {"detail": detail, "source": x, "candidates": [], "list_error": list_err or f"HTTP {list_status}", "source_type": "items_error"}, "no_publications"
+
+                candidates = []
+                if isinstance(listings, dict):
+                    # A API pode devolver a coleção em resultados ou items conforme o recurso/versão.
+                    candidates = listings.get("results") or listings.get("items") or listings.get("publications") or []
+                elif isinstance(listings, list):
+                    candidates = listings
+
+                # Alguns retornos podem trazer o vencedor dentro do detalhe e a lista em formato diferente.
+                if not candidates and isinstance(winner, dict):
+                    winner_id = winner.get("item_id") or winner.get("id")
+                    winner_price = num(winner.get("price"))
+                    if winner_id and winner_price is not None and winner_price > 0:
+                        candidates = [winner]
 
                 if not candidates:
-                    return {"detail":detail,"source":x,"candidates":[]}, "no_publications"
-                return {"detail":detail,"source":x,"candidates":candidates}, "ok"
-            except HTTPException as exc:
-                return {"error": str(exc)}, "api_error"
+                    return {"detail": detail, "source": x, "candidates": [], "source_type": "none"}, "no_publications"
+
+                return {"detail": detail, "source": x, "candidates": candidates, "source_type": "items"}, "ok"
+            except requests.RequestException as exc:
+                return {"error": str(exc)}, "error"
             except Exception as exc:
                 return {"error": str(exc)}, "error"
 
         inspected = []
-        # Paralelismo reduz drasticamente o tempo sem sobrecarregar a API.
-        with ThreadPoolExecutor(max_workers=6) as pool:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=8) as pool:
             futures = [pool.submit(inspect_catalog, x) for x in raw]
             for f in as_completed(futures):
                 result, state = f.result()
                 if state == "ok":
                     stats["catalog_details_ok"] += 1
-                    stats["publication_lists_ok"] += 1
                     inspected.append(result)
+                    if result.get("source_type") == "buy_box":
+                        stats["buy_box_used"] += 1
+                    else:
+                        stats["publication_lists_ok"] += 1
+                        stats["items_endpoint_used"] += 1
                 elif state == "no_publications":
                     stats["catalog_details_ok"] += 1
                     stats["products_without_publications"] += 1
-                elif state == "detail_404":
-                    stats["errors"] += 1
-                elif state in ("error", "api_error"):
+                elif state not in ("inactive", "no_id"):
                     stats["errors"] += 1
 
         output = []
@@ -1784,29 +1814,21 @@ def mercadolivre_search(payload: dict):
         for obj in inspected:
             detail = obj["detail"]
             source = obj["source"]
-            candidates = obj["candidates"]
+            candidates = obj.get("candidates") or []
 
-            # Ordena pelo preço atual quando disponível.
-            candidates = sorted(
-                candidates,
-                key=lambda c: num(c.get("price")) if num(c.get("price")) is not None else float("inf")
-            )
-
-            chosen = None
+            # Melhor candidato: preço atual válido. O vencedor vem primeiro quando disponível.
+            valid = []
             for c in candidates:
+                if not isinstance(c, dict):
+                    continue
                 item_id = c.get("item_id") or c.get("id")
                 price = num(c.get("price"))
-                if not item_id or price is None or price <= 0:
+                if not item_id or price is None or price <= 0 or item_id in seen_items:
                     continue
-                if item_id in seen_items:
-                    continue
+                valid.append(c)
 
-                # /products/{id}/items já representa publicações do PDP.
-                # Não exigimos available_quantity, pois esse campo pode não
-                # estar disponível de forma completa para token de afiliado.
-                chosen = c
-                break
-
+            valid.sort(key=lambda c: num(c.get("price")) if num(c.get("price")) is not None else float("inf"))
+            chosen = valid[0] if valid else None
             if not chosen:
                 stats["products_without_price"] += 1
                 continue
@@ -1852,7 +1874,6 @@ def mercadolivre_search(payload: dict):
             if len(output) >= limit:
                 break
 
-        # Melhor resultado primeiro: desconto, depois preço.
         output.sort(key=lambda p: (
             -(float(p.get("discount_rate") or 0)),
             float(p.get("current_price") or 10**12)
@@ -1860,15 +1881,15 @@ def mercadolivre_search(payload: dict):
 
         return {
             "query": query,
-            "source": "mercadolivre_catalog_publications",
+            "source": "mercadolivre_catalog_publications_v4_2",
             "total_catalog_candidates": (search.get("paging") or {}).get("total", len(raw)),
             "returned": len(output),
             "items": output,
             "diagnostic": stats,
             "message": (
-                "Ofertas encontradas a partir das publicações reais do catálogo."
+                "Ofertas encontradas usando o vencedor do catálogo e publicações concorrentes."
                 if output else
-                "O catálogo respondeu, mas não foi encontrada publicação com preço atual para este termo."
+                "O catálogo respondeu, mas não foi encontrada uma publicação com preço atual para este termo."
             ),
         }
     except HTTPException:
