@@ -1646,266 +1646,285 @@ def mercadolivre_search_diagnostic(q: str = "relogio"):
     run("sites/MLB/search", "https://api.mercadolibre.com/sites/MLB/search", {"q":q,"limit":5})
     return {"query": q, "tests": tests}
 
-@app.post("/api/mercadolivre/search")
-def mercadolivre_search(payload: dict):
-    """Busca produtos do catálogo e obtém a oferta atual.
 
-    Estratégia V4.2:
-    1) /products/search encontra PDPs do catálogo.
-    2) /products/{id} é a fonte principal: seu buy_box_winner já traz item_id e preço atual.
-    3) Somente quando não houver buy_box_winner tentamos /products/{id}/items.
-    4) Não exigimos /items/{item_id}, estoque ou vendas do proprietário.
-    """
-    query = (payload.get("query") or "").strip()
+def _norm_text(value):
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9áéíóúãõç ]+", " ", str(value or "").lower())).strip()
+
+ACCESSORY_TERMS = {
+    "capa", "case", "pelicula", "película", "capinha", "cabo", "carregador",
+    "fonte", "adaptador", "suporte", "pulseira", "bracelete", "bateria", "dock"
+}
+
+def _looks_like_accessory(title):
+    words = set(_norm_text(title).split())
+    return bool(words & ACCESSORY_TERMS)
+
+def _opportunity_score(p):
+    import math
+    def n(v):
+        try:
+            return None if v in (None, "") else float(v)
+        except Exception:
+            return None
+
+    sales = n(p.get("sales"))
+    rating = n(p.get("rating"))
+    disc = n(p.get("discount_rate"))
+    commission = n(p.get("commission_rate"))
+    competition = n(p.get("competition_index"))
+
+    demand = min(100, 20 + 20 * math.log10(max(1, sales))) if sales is not None else 45
+    commission_s = min(100, (commission or 0) * 5) if commission is not None else 35
+    discount_s = min(100, (disc or 0) * 2.2) if disc is not None else 25
+    rating_s = min(100, max(0, ((rating or 4) - 3) * 25)) if rating is not None else 60
+    competition_s = 100 - min(100, max(0, competition)) if competition is not None else 50
+
+    completeness = sum(bool(p.get(k)) for k in
+                       ("current_price", "url", "image_url", "item_id", "product_id")) / 5 * 100
+
+    return round(max(0, min(100,
+        demand * .30 +
+        competition_s * .25 +
+        commission_s * .15 +
+        discount_s * .10 +
+        70 * .05 +
+        rating_s * .05 +
+        completeness * .10
+    )), 2)
+
+def _opportunity_label(score):
+    if score >= 90: return "EXCELENTE OPORTUNIDADE"
+    if score >= 80: return "BOA OPORTUNIDADE"
+    if score >= 70: return "OPORTUNIDADE MODERADA"
+    return "ANALISAR"
+
+def _discovery_queries(niche):
+    n = _norm_text(niche)
+    if not n:
+        return [
+            "smartphone", "celular", "smartwatch", "fone bluetooth",
+            "televisão", "notebook", "monitor", "aspirador",
+            "air fryer", "cafeteira", "máquina de cortar cabelo",
+            "tênis", "beleza", "fitness", "casa"
+        ]
+
+    expansions = {
+        "iphone": ["iphone celular", "iphone smartphone"],
+        "smartwatch": ["smartwatch relógio inteligente", "relógio inteligente"],
+        "celular": ["celular smartphone", "smartphone"],
+        "relogio": ["relógio masculino", "relógio feminino", "smartwatch"],
+        "relógio": ["relógio masculino", "relógio feminino", "smartwatch"],
+        "eletronicos": ["eletrônicos", "smartphone", "smartwatch", "fone bluetooth", "notebook"],
+        "eletrônicos": ["eletrônicos", "smartphone", "smartwatch", "fone bluetooth", "notebook"],
+        "beleza": ["secador", "chapinha", "modelador", "máquina de cortar cabelo", "skincare"],
+        "fitness": ["smartwatch", "tênis corrida", "halter", "acessórios fitness"]
+    }
+    out = [n]
+    for key, vals in expansions.items():
+        if key in n:
+            out.extend(vals)
+    out.extend([f"{n} mais vendidos", f"{n} promoção"])
+    return list(dict.fromkeys(out))
+
+def _inspect_discovery_product(access_token, item, query):
+    import requests
+    pid = item.get("id") or item.get("catalog_product_id")
+    if not pid:
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "User-Agent": "OFERTA-IA/3.0",
+        "Accept": "application/json",
+    }
+
+    def get(url, params=None):
+        r = requests.get(url, params=params, timeout=12, headers=headers)
+        if r.status_code in (401, 403):
+            raise RuntimeError(f"Mercado Livre HTTP {r.status_code}")
+        r.raise_for_status()
+        return r.json()
+
     try:
-        limit = max(1, min(20, int(payload.get("limit") or 10)))
-    except (TypeError, ValueError):
-        limit = 10
-    if not query:
-        raise HTTPException(400, "Informe um termo de busca.")
+        detail = get(f"https://api.mercadolibre.com/products/{pid}")
+        winner = detail.get("buy_box_winner")
+        candidates = [winner] if isinstance(winner, dict) else []
+
+        if not candidates:
+            try:
+                data = get(f"https://api.mercadolibre.com/products/{pid}/items", {"limit": 20})
+                if isinstance(data, dict):
+                    candidates = data.get("results") or data.get("items") or data.get("publications") or []
+                elif isinstance(data, list):
+                    candidates = data
+            except Exception:
+                candidates = []
+
+        best = None
+        for c in candidates:
+            if not isinstance(c, dict):
+                continue
+            iid = c.get("item_id") or c.get("id")
+            price = None
+            try:
+                price = float(c.get("price"))
+            except Exception:
+                pass
+            title = c.get("title") or detail.get("name") or item.get("name")
+            if not iid or not price or price <= 0 or _looks_like_accessory(title):
+                continue
+            if best is None or price < float(best.get("price") or 10**12):
+                best = c
+
+        if not best:
+            return None
+
+        seller = best.get("seller") or {}
+        image = best.get("secure_thumbnail") or best.get("thumbnail")
+        if not image:
+            pics = detail.get("pictures") or item.get("pictures") or []
+            if pics and isinstance(pics[0], dict):
+                image = pics[0].get("secure_url") or pics[0].get("url")
+
+        current = float(best.get("price"))
+        old = best.get("original_price")
+        try:
+            old = float(old) if old not in (None, "") else None
+        except Exception:
+            old = None
+
+        if old is None and isinstance(winner, dict):
+            try:
+                old = float(winner.get("original_price"))
+            except Exception:
+                old = None
+
+        p = {
+            "name": best.get("title") or detail.get("name") or item.get("name") or "Produto Mercado Livre",
+            "store": str(seller.get("nickname") or "Mercado Livre"),
+            "marketplace": "mercadolivre",
+            "product_id": pid,
+            "catalog_product_id": pid,
+            "item_id": best.get("item_id") or best.get("id"),
+            "seller_id": best.get("seller_id") or seller.get("id"),
+            "url": best.get("permalink") or detail.get("permalink") or item.get("permalink"),
+            "image_url": image,
+            "current_price": current,
+            "old_price": old,
+            "discount_rate": (
+                round((old-current)/old*100, 2) if old and old > current else None
+            ),
+            "buy_box_winner": bool(
+                isinstance(winner, dict) and
+                (best.get("item_id") or best.get("id")) == winner.get("item_id")
+            ),
+            "category": detail.get("domain_id") or item.get("domain_id"),
+            "sales": best.get("sold_quantity"),
+            "rating": best.get("rating"),
+            "condition": best.get("condition") or best.get("item_condition"),
+            "data_confidence": "alta",
+            "discovery_query": query,
+        }
+        p["opportunity_score"] = _opportunity_score(p)
+        p["opportunity_label"] = _opportunity_label(p["opportunity_score"])
+        return p
+    except Exception:
+        return None
+
+@app.post("/api/mercadolivre/opportunities")
+def mercadolivre_opportunities(payload: dict):
+    """Motor principal do OFERTA IA: descobre oportunidades sem exigir produto."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     connection = _get_connection("mercadolivre")
     access_token = (connection or {}).get("access_token")
     if not access_token:
         raise HTTPException(401, "Mercado Livre não está conectado.")
 
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "User-Agent": "OFERTA-IA/2.1",
-        "Accept": "application/json",
+    niche = (payload.get("niche") or "").strip()
+    try:
+        limit = max(5, min(30, int(payload.get("limit") or 20)))
+    except Exception:
+        limit = 20
+
+    queries = _discovery_queries(niche)
+    catalog = []
+    seen_catalog = set()
+
+    for q in queries:
+        try:
+            data = requests.get(
+                "https://api.mercadolibre.com/products/search",
+                params={"status": "active", "site_id": "MLB", "q": q, "limit": 20},
+                timeout=18,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "User-Agent": "OFERTA-IA/3.0",
+                    "Accept": "application/json",
+                },
+            )
+            if data.status_code in (401, 403):
+                continue
+            data.raise_for_status()
+            for x in (data.json().get("results") or []):
+                pid = x.get("id") or x.get("catalog_product_id")
+                if pid and pid not in seen_catalog:
+                    seen_catalog.add(pid)
+                    catalog.append((x, q))
+        except Exception:
+            continue
+
+    products = []
+    seen_items = set()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [
+            pool.submit(_inspect_discovery_product, access_token, x, q)
+            for x, q in catalog[:120]
+        ]
+        for f in as_completed(futures):
+            try:
+                p = f.result()
+            except Exception:
+                p = None
+            if p and p.get("item_id") not in seen_items:
+                seen_items.add(p["item_id"])
+                products.append(p)
+
+    products.sort(key=lambda p: (
+        -float(p.get("opportunity_score") or 0),
+        -float(p.get("discount_rate") or 0)
+    ))
+
+    selected = [p for p in products if float(p.get("opportunity_score") or 0) >= 70]
+    selected = (selected or products)[:limit]
+
+    return {
+        "mode": "automatic_discovery",
+        "niche": niche or "todos",
+        "queries_used": queries,
+        "catalog_candidates": len(catalog),
+        "products_analyzed": len(products),
+        "returned": len(selected),
+        "items": selected,
+        "message": (
+            f"Foram analisados {len(products)} produtos e selecionadas {len(selected)} oportunidades."
+            if selected else
+            "Não foram encontradas oportunidades com dados atuais suficientes."
+        ),
     }
 
-    def get_json(url, params=None, timeout=12, allow_404=False):
-        r = requests.get(url, params=params, timeout=timeout, headers=headers)
-        if r.status_code == 404 and allow_404:
-            return None, r.status_code, ""
-        if r.status_code in (401, 403):
-            return None, r.status_code, r.text[:700]
-        r.raise_for_status()
-        try:
-            return r.json(), r.status_code, ""
-        except ValueError:
-            return None, r.status_code, "JSON inválido"
-
-    def num(v):
-        try:
-            if v is None or v == "":
-                return None
-            return float(v)
-        except (TypeError, ValueError):
-            return None
-
-    def discount(cur, old):
-        cur, old = num(cur), num(old)
-        if cur and old and old > cur > 0:
-            return round((old-cur)/old*100, 2)
-        return None
-
-    try:
-        # Busca candidatos do catálogo. Mantemos uma margem porque alguns PDPs não têm vencedor.
-        search, search_status, search_error = get_json(
-            "https://api.mercadolibre.com/products/search",
-            {"status":"active", "site_id":"MLB", "q":query,
-             "limit":min(30, max(15, limit * 2))},
-            timeout=18,
-        )
-        if search is None:
-            detail = search_error or ""
-            raise HTTPException(502, f"Falha na busca do catálogo ({search_status}). {detail}")
-
-        raw = (search or {}).get("results") or []
-        raw = raw[:min(30, max(15, limit * 2))]
-
-        stats = {
-            "catalog_candidates": len(raw),
-            "catalog_details_ok": 0,
-            "publication_lists_ok": 0,
-            "products_without_publications": 0,
-            "products_without_price": 0,
-            "errors": 0,
-            "buy_box_used": 0,
-            "items_endpoint_used": 0,
-        }
-
-        def inspect_catalog(x):
-            product_id = x.get("id") or x.get("catalog_product_id")
-            if not product_id:
-                return None, "no_id"
-            try:
-                detail, status, err = get_json(
-                    f"https://api.mercadolibre.com/products/{product_id}",
-                    timeout=10, allow_404=True
-                )
-                if not detail:
-                    return {"error": err or f"HTTP {status}"}, "error"
-
-                product_status = str(detail.get("status") or x.get("status") or "").lower()
-                if product_status and product_status != "active":
-                    return None, "inactive"
-
-                # PRIMEIRO CAMINHO: o próprio detalhe do PDP pode trazer a publicação vencedora.
-                winner = detail.get("buy_box_winner")
-                if isinstance(winner, dict):
-                    winner_id = winner.get("item_id") or winner.get("id")
-                    winner_price = num(winner.get("price"))
-                    if winner_id and winner_price is not None and winner_price > 0:
-                        return {
-                            "detail": detail,
-                            "source": x,
-                            "candidates": [winner],
-                            "source_type": "buy_box",
-                        }, "ok"
-
-                # SEGUNDO CAMINHO: lista de publicações concorrentes.
-                listings, list_status, list_err = get_json(
-                    f"https://api.mercadolibre.com/products/{product_id}/items",
-                    {"limit":20}, timeout=10, allow_404=True
-                )
-                if listings is None:
-                    # Não transformamos um 403/404 deste endpoint em falha do produto.
-                    return {"detail": detail, "source": x, "candidates": [], "list_error": list_err or f"HTTP {list_status}", "source_type": "items_error"}, "no_publications"
-
-                candidates = []
-                if isinstance(listings, dict):
-                    # A API pode devolver a coleção em resultados ou items conforme o recurso/versão.
-                    candidates = listings.get("results") or listings.get("items") or listings.get("publications") or []
-                elif isinstance(listings, list):
-                    candidates = listings
-
-                # Alguns retornos podem trazer o vencedor dentro do detalhe e a lista em formato diferente.
-                if not candidates and isinstance(winner, dict):
-                    winner_id = winner.get("item_id") or winner.get("id")
-                    winner_price = num(winner.get("price"))
-                    if winner_id and winner_price is not None and winner_price > 0:
-                        candidates = [winner]
-
-                if not candidates:
-                    return {"detail": detail, "source": x, "candidates": [], "source_type": "none"}, "no_publications"
-
-                return {"detail": detail, "source": x, "candidates": candidates, "source_type": "items"}, "ok"
-            except requests.RequestException as exc:
-                return {"error": str(exc)}, "error"
-            except Exception as exc:
-                return {"error": str(exc)}, "error"
-
-        inspected = []
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            futures = [pool.submit(inspect_catalog, x) for x in raw]
-            for f in as_completed(futures):
-                result, state = f.result()
-                if state == "ok":
-                    stats["catalog_details_ok"] += 1
-                    inspected.append(result)
-                    if result.get("source_type") == "buy_box":
-                        stats["buy_box_used"] += 1
-                    else:
-                        stats["publication_lists_ok"] += 1
-                        stats["items_endpoint_used"] += 1
-                elif state == "no_publications":
-                    stats["catalog_details_ok"] += 1
-                    stats["products_without_publications"] += 1
-                elif state not in ("inactive", "no_id"):
-                    stats["errors"] += 1
-
-        output = []
-        seen_items = set()
-
-        for obj in inspected:
-            detail = obj["detail"]
-            source = obj["source"]
-            candidates = obj.get("candidates") or []
-
-            # Melhor candidato: preço atual válido. O vencedor vem primeiro quando disponível.
-            valid = []
-            for c in candidates:
-                if not isinstance(c, dict):
-                    continue
-                item_id = c.get("item_id") or c.get("id")
-                price = num(c.get("price"))
-                if not item_id or price is None or price <= 0 or item_id in seen_items:
-                    continue
-                valid.append(c)
-
-            valid.sort(key=lambda c: num(c.get("price")) if num(c.get("price")) is not None else float("inf"))
-            chosen = valid[0] if valid else None
-            if not chosen:
-                stats["products_without_price"] += 1
-                continue
-
-            item_id = chosen.get("item_id") or chosen.get("id")
-            seen_items.add(item_id)
-            current = num(chosen.get("price"))
-            old = num(chosen.get("original_price"))
-            if old is None:
-                old = num((detail.get("buy_box_winner") or {}).get("original_price"))
-            disc = discount(current, old)
-
-            seller = chosen.get("seller") or {}
-            seller_id = chosen.get("seller_id")
-            nickname = seller.get("nickname") or chosen.get("seller_nickname") or "Mercado Livre"
-            permalink = chosen.get("permalink") or detail.get("permalink") or source.get("permalink")
-            image = chosen.get("secure_thumbnail") or chosen.get("thumbnail")
-            if not image:
-                pics = detail.get("pictures") or source.get("pictures") or []
-                if pics and isinstance(pics[0], dict):
-                    image = pics[0].get("secure_url") or pics[0].get("url")
-
-            output.append({
-                "name": chosen.get("title") or detail.get("name") or source.get("name") or "Produto Mercado Livre",
-                "store": str(nickname),
-                "marketplace": "mercadolivre",
-                "product_id": source.get("id") or source.get("catalog_product_id"),
-                "catalog_product_id": source.get("id") or source.get("catalog_product_id"),
-                "item_id": item_id,
-                "seller_id": seller_id,
-                "url": permalink,
-                "image_url": image,
-                "current_price": current,
-                "old_price": old,
-                "discount_rate": disc,
-                "buy_box_winner": bool(item_id == (detail.get("buy_box_winner") or {}).get("item_id")),
-                "available_quantity": num(chosen.get("available_quantity")),
-                "sold_quantity": num(chosen.get("sold_quantity")),
-                "condition": chosen.get("condition") or chosen.get("item_condition"),
-                "category": detail.get("domain_id") or source.get("domain_id"),
-                "data_confidence": "alta",
-            })
-            if len(output) >= limit:
-                break
-
-        output.sort(key=lambda p: (
-            -(float(p.get("discount_rate") or 0)),
-            float(p.get("current_price") or 10**12)
-        ))
-
-        return {
-            "query": query,
-            "source": "mercadolivre_catalog_publications_v4_2",
-            "total_catalog_candidates": (search.get("paging") or {}).get("total", len(raw)),
-            "returned": len(output),
-            "items": output,
-            "diagnostic": stats,
-            "message": (
-                "Ofertas encontradas usando o vencedor do catálogo e publicações concorrentes."
-                if output else
-                "O catálogo respondeu, mas não foi encontrada uma publicação com preço atual para este termo."
-            ),
-        }
-    except HTTPException:
-        raise
-    except requests.RequestException as exc:
-        raise HTTPException(502, f"Falha de comunicação com o Mercado Livre: {exc}")
-    except Exception as exc:
-        raise HTTPException(502, f"Falha na busca do Mercado Livre: {exc}")
-
-@app.post("/api/amazon/settings")
-def amazon_settings(payload: dict):
-    tag=(payload.get("tag") or "").strip()
-    if not tag:
-        raise HTTPException(400,"Informe a identificação de associado Amazon.")
-    _save_connection("amazon", {"affiliate_tag": tag, "status":"configured"})
-    return {"ok":True,"tag":tag}
+@app.post("/api/mercadolivre/search")
+def mercadolivre_search(payload: dict):
+    """Pesquisa específica/secundária: produto ou nicho."""
+    query = (payload.get("query") or "").strip()
+    if not query:
+        raise HTTPException(400, "Informe um produto ou nicho.")
+    return mercadolivre_opportunities({
+        "niche": query,
+        "limit": payload.get("limit", 10)
+    })
 
 @app.get("/api/products")
 def products():
