@@ -83,7 +83,7 @@ function money(v){return v==null?'—':'R$ '+Number(v).toFixed(2).replace('.',',
 function channels(){return [...document.querySelectorAll('#channelOptions input:checked')].map(x=>x.value)}
 function toggle(id,on){document.getElementById(id).classList.toggle('hidden',!on)}
 function productUrl(p){const u=String(p?.url||'');if(/^https?:\/\//i.test(u)&&!u.includes('oferta-ia.onrender.com'))return u;return ''}
-function opportunityCard(p,i){let s=Number(p.opportunity_score||0);let label=s>=90?'EXCELENTE OPORTUNIDADE':s>=80?'BOA OPORTUNIDADE':s>=70?'OPORTUNIDADE MODERADA':'ANALISAR';return `<div class="opportunity" id="opp-${i}"><div class="topline"><span class="badge">⭐ ${s.toFixed(0)}/100</span><span class="tag">${label}</span></div>${p.image_url?`<img class="product-image" src="${esc(p.image_url)}" alt="" loading="lazy">`:''}<h3>${esc(p.name)}</h3><div class="muted">${esc(p.store||'Mercado Livre')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}<div class="offer-data"><div class="metric">Desconto<b>${p.discount_rate!=null?Number(p.discount_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Ranking<b>${p.rank_position?('#'+p.rank_position):'—'}</b></div><div class="metric">Confiança<b>${esc(p.data_confidence||'estimada')}</b></div></div><div class="actions"><a class="buy-btn" href="${esc(productUrl(p))}" target="_blank" rel="noopener noreferrer">🛒 Ver produto</a><button class="approve-btn" onclick="approveOpportunity(${i})">✅ Aprovar</button></div><button class="reject-btn" onclick="document.getElementById('opp-${i}').remove()">❌ Descartar</button></div>`}
+function opportunityCard(p,i){let s=Number(p.opportunity_score||0);let label=s>=90?'EXCELENTE OPORTUNIDADE':s>=80?'BOA OPORTUNIDADE':s>=70?'OPORTUNIDADE MODERADA':'ANALISAR';return `<div class="opportunity" id="opp-${i}"><div class="topline"><span class="badge">⭐ ${s.toFixed(0)}/100</span><span class="tag">${label}</span></div>${p.image_url?`<img class="product-image" src="${esc(p.image_url)}" alt="" loading="lazy">`:''}<h3>${esc(p.name)}</h3><div class="muted">${esc(p.store||'Mercado Livre')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}<div class="offer-data"><div class="metric">Desconto<b>${p.discount_rate!=null?Number(p.discount_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Ranking<b>${p.rank_position?('#'+p.rank_position):'—'}</b></div><div class="metric">Confiança<b>${esc(p.data_confidence||'estimada')}</b></div></div><div class="actions">${productUrl(p)?`<a class="buy-btn" href="${esc(productUrl(p))}" target="_blank" rel="noopener noreferrer">🛒 Ver produto</a>`:`<span class="muted">🔗 Link de compra indisponível</span>`}<button class="approve-btn" onclick="approveOpportunity(${i})">✅ Aprovar</button></div><button class="reject-btn" onclick="document.getElementById('opp-${i}').remove()">❌ Descartar</button></div>`}
 async function loadOpportunities(){let status=document.getElementById('opportunityStatus'),list=document.getElementById('opportunityList'),btn=document.getElementById('runOpportunities');btn.disabled=true;btn.textContent='⏳ Analisando oportunidades...';status.textContent='Validando conexão e consultando oportunidades...';try{let conn=await fetch('/api/integrations/status',{cache:'no-store'}),cd=await conn.json();if(!cd.mercadolivre?.connected)throw Error(cd.mercadolivre?.message||'Conecte o Mercado Livre antes de procurar oportunidades.');let r=await fetch('/api/mercadolivre/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:document.getElementById('opportunityNiche').value.trim(),limit:Number(document.getElementById('opportunityLimit').value||10)})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha na descoberta.');window.currentOpportunities=d.items||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade encontrada com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.'}catch(e){status.textContent='⚠️ '+e.message}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
 async function searchProducts(){let q=document.getElementById('productSearch').value.trim(),out=document.getElementById('productResults'),status=document.getElementById('productSearchStatus');if(!q){status.textContent='Digite um produto ou nicho.';return}status.textContent='🔎 Pesquisando...';out.innerHTML='';try{let conn=await fetch('/api/integrations/status',{cache:'no-store'}),cd=await conn.json();if(!cd.mercadolivre?.connected)throw Error(cd.mercadolivre?.message||'Conecte o Mercado Livre antes de pesquisar.');let r=await fetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number(document.getElementById('productLimit').value||10)})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha na pesquisa.');let items=d.items||[];out.innerHTML=items.length?items.map((p,i)=>`<div class="product"><strong>${esc(p.name)}</strong><div class="muted">${esc(p.store||'Mercado Livre')} · ${esc(p.category||'')}</div><div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old-price">de ${money(p.old_price)}</div>`:''}${p.image_url?`<img class="product-image" src="${esc(p.image_url)}" alt="">`:''}${p.url?`<a class="buy-btn" href="${esc(p.url)}" target="_blank" rel="noopener">Ver produto</a>`:''}<button class="approve-btn" onclick="addProduct(${i})">➕ Adicionar ao OFERTA IA</button></div>`).join(''):'<div class="empty">Nenhum produto relevante encontrado.</div>';window.currentSearchProducts=items;status.textContent=`✅ ${items.length} produto(s) relevante(s) encontrado(s).`}catch(e){status.textContent='⚠️ '+e.message}}
 async function addProduct(i){let p=window.currentSearchProducts?.[i];if(!p)return;try{let r=await fetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name,store:p.store||'Mercado Livre',url:p.url,category:p.category,current_price:p.current_price,old_price:p.old_price,image_url:p.image_url,marketplace:p.marketplace||'mercadolivre',item_id:p.item_id})});let d=await r.json();if(!r.ok)throw Error(d.detail||'Falha ao salvar.');alert('Produto adicionado ao OFERTA IA.');loadProducts()}catch(e){alert(e.message)}}
@@ -1000,7 +1000,7 @@ def _product_from_catalog(token, catalog_item, rank_position=None, query=''):
                 pass
         # Sem anúncio real, não fabricamos URL. A PDP do catálogo só é usada como
         # último recurso quando ela própria foi retornada pelo Mercado Livre.
-        real_url = item_permalink or detail.get('permalink') or catalog_item.get('permalink')
+        real_url = item_permalink if item_id else (detail.get('permalink') or catalog_item.get('permalink'))
         p={'name':best.get('title') or detail.get('name') or catalog_item.get('name') or 'Produto Mercado Livre','store':str((best.get('seller') or {}).get('nickname') or 'Mercado Livre'),'marketplace':'mercadolivre','product_id':pid,'catalog_product_id':pid,'item_id':item_id,'seller_id':best.get('seller_id') or (best.get('seller') or {}).get('id'),'url':real_url,'image_url':image,'current_price':cur,'old_price':old,'discount_rate':round((old-cur)/old*100,2) if old and cur is not None and old>cur else None,'category':detail.get('domain_id') or catalog_item.get('domain_id'),'rating':best.get('rating'),'condition':best.get('condition') or best.get('item_condition'),'rank_position':rank_position,'discovery_query':query,'data_confidence':'alta'}
         p['opportunity_score']=_opportunity_score(p);p['opportunity_label']=_opportunity_label(p['opportunity_score'])
         return p
@@ -1188,18 +1188,35 @@ def refresh_product_prices():
     if not token:
         raise HTTPException(401, "Mercado Livre não está conectado ou a conexão expirou.")
     def refresh(row):
+        # Primeiro tenta o item_id já salvo. Para registros antigos sem item_id,
+        # usa o product/catalog_product_id para descobrir o buy_box_winner e então
+        # consulta o anúncio real. Isso permite recuperar preços e links antigos.
         iid = row.get("item_id")
-        if not iid: return row, False
+        pid = row.get("product_id") or row.get("catalog_product_id")
         try:
-            item, _ = _meli_get(token, f"https://api.mercadolibre.com/items/{iid}", timeout=8)
+            item = None
+            if iid:
+                item, _ = _meli_get(token, f"https://api.mercadolibre.com/items/{iid}", timeout=8)
+            elif pid:
+                detail, _ = _meli_get(token, f"https://api.mercadolibre.com/products/{pid}", timeout=8)
+                if isinstance(detail, dict):
+                    winner = detail.get("buy_box_winner")
+                    if isinstance(winner, dict):
+                        iid = winner.get("item_id") or winner.get("id")
+                    if iid:
+                        item, _ = _meli_get(token, f"https://api.mercadolibre.com/items/{iid}", timeout=8)
             if not isinstance(item, dict): return row, False
             update = {}
             price = _price_number(item.get("price"))
             original = _price_number(item.get("original_price"))
             permalink = item.get("permalink")
             image = item.get("secure_thumbnail") or item.get("thumbnail")
+            if iid and not row.get("item_id"): update["item_id"] = iid
             if price is not None: update["current_price"] = price
             if original is not None: update["old_price"] = original
+            elif price is not None and row.get("old_price") is None:
+                # Não inventa preço antigo: apenas mantém vazio quando o ML não fornece original_price.
+                pass
             if original and price is not None and original > price:
                 update["discount_rate"] = round((original-price)/original*100,2)
             if permalink: update["url"] = permalink
