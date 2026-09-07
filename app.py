@@ -1609,18 +1609,16 @@ def mercadolivre_diagnostico():
 
 @app.post("/api/mercadolivre/search")
 def mercadolivre_search(payload: dict):
-    """Busca produtos do catálogo que tenham uma publicação real comprável agora.
+    """Busca somente anúncios do Mercado Livre que possam ser comprados agora.
 
-    Estratégia V3.8:
-    1) Pesquisa somente produtos de catálogo ativos.
-    2) Consulta o detalhe do produto para usar o buy_box_winner quando existir.
-    3) Se não houver buy_box_winner, consulta /products/{id}/items para encontrar
-       publicações reais que estejam vendendo o produto.
-    4) Valida cada anúncio escolhido em /items/{item_id}.
-    5) Só retorna anúncio com status=active e preço atual válido.
-
-    Isso evita mostrar páginas de catálogo antigas, produtos sem vendedor,
-    anúncios pausados/encerrados e resultados sem preço.
+    V3.9:
+    1) Tenta primeiro a busca de listagens do site (/sites/MLB/search), usando o
+       OAuth do usuário. Essa fonte representa anúncios reais, não páginas de
+       catálogo antigas.
+    2) Valida cada anúncio escolhido em /items/{item_id}.
+    3) Se a busca de listagens for recusada pela API, usa /products/search com
+       status=active e, quando necessário, o buy_box_winner do catálogo.
+    4) Nunca retorna um item sem preço atual válido.
     """
     query = (payload.get("query") or "").strip()
     try:
@@ -1642,16 +1640,6 @@ def mercadolivre_search(payload: dict):
         "Accept": "application/json",
     }
 
-    def get_json(url, params=None, timeout=15, allow_404=False):
-        r = requests.get(url, params=params, timeout=timeout, headers=headers)
-        if r.status_code in (401, 403):
-            detail = r.text[:700]
-            raise HTTPException(502, f"Mercado Livre recusou uma consulta ({r.status_code}). Detalhe: {detail}")
-        if r.status_code == 404 and allow_404:
-            return None
-        r.raise_for_status()
-        return r.json()
-
     def number(value):
         try:
             if value is None or value == "":
@@ -1667,239 +1655,293 @@ def mercadolivre_search(payload: dict):
             return round(((old - current) / old) * 100, 2)
         return None
 
-    def validate_item(item_id, fallback=None):
-        """Retorna os dados atuais de um anúncio ou None se não estiver comprável."""
-        fallback = fallback or {}
-        item = get_json(
+    def request_json(url, params=None, timeout=15):
+        response = requests.get(url, params=params, timeout=timeout, headers=headers)
+        try:
+            data = response.json()
+        except Exception:
+            data = {}
+        return response, data
+
+    def validate_item(item_id):
+        """Confirma no endpoint de item que o anúncio está ativo e tem preço."""
+        if not item_id:
+            return None, "no_item_id"
+        response, item = request_json(
             f"https://api.mercadolibre.com/items/{item_id}",
             timeout=12,
-            allow_404=True,
-        ) or {}
-        if not item:
-            return None
+        )
+        if response.status_code == 404:
+            return None, "not_found"
+        if response.status_code in (401, 403):
+            return None, f"http_{response.status_code}"
+        if not response.ok or not isinstance(item, dict):
+            return None, f"http_{response.status_code}"
 
         status = str(item.get("status") or "").lower()
         if status and status != "active":
-            return None
+            return None, "inactive"
 
         quantity = number(item.get("available_quantity"))
         if quantity is not None and quantity <= 0:
-            return None
+            return None, "out_of_stock"
 
-        current_price = number(item.get("price"))
-        if current_price is None:
-            current_price = number(fallback.get("price"))
+        price = number(item.get("price"))
+        if price is None or price <= 0:
+            return None, "no_price"
 
-        original_price = number(item.get("original_price"))
-        if original_price is None:
-            original_price = number(fallback.get("original_price"))
+        return item, "ok"
 
-        # Em alguns anúncios o preço atual é melhor obtido pelo recurso /prices.
-        if current_price is None:
-            try:
-                prices = get_json(
-                    f"https://api.mercadolibre.com/items/{item_id}/prices",
-                    timeout=10,
-                ) or {}
-                price_rows = prices.get("prices") or []
-                eligible = [
-                    pr for pr in price_rows
-                    if (pr.get("conditions") or {}).get("context_restrictions", [])
-                    in ([], ["channel_marketplace"])
-                ]
-                candidates = eligible or price_rows
-                if candidates:
-                    # Promoção ativa tem prioridade; depois preço standard.
-                    chosen = next((pr for pr in candidates if pr.get("type") == "promotion"), None)
-                    if chosen is None:
-                        chosen = next((pr for pr in candidates if pr.get("type") == "standard"), candidates[0])
-                    current_price = number(chosen.get("amount"))
-                    if original_price is None:
-                        original_price = number(chosen.get("regular_amount"))
-            except (requests.RequestException, HTTPException):
-                pass
-
-        if current_price is None or current_price <= 0:
-            return None
-
-        return {
-            "item": item,
-            "current_price": current_price,
-            "original_price": original_price,
-            "available_quantity": quantity,
-        }
-
+    # ---------------------------------------------------------------
+    # FONTE 1: anúncios reais atualmente listados no Mercado Livre.
+    # ---------------------------------------------------------------
+    listing_search_error = None
     try:
-        # O buscador oficial de catálogo aceita status=active e evita produtos
-        # de catálogo inativos já na origem.
-        search = get_json(
+        response, search = request_json(
+            "https://api.mercadolibre.com/sites/MLB/search",
+            params={
+                "q": query,
+                "limit": min(50, max(limit * 4, 20)),
+                "sort": "relevance",
+            },
+            timeout=20,
+        )
+
+        if response.ok:
+            results = search.get("results") or []
+            items = []
+            rejected = {
+                "inactive": 0,
+                "out_of_stock": 0,
+                "no_price": 0,
+                "not_found": 0,
+                "other": 0,
+            }
+
+            for candidate in results:
+                if len(items) >= limit:
+                    break
+
+                item_id = candidate.get("id")
+                checked, reason = validate_item(item_id)
+                if not checked:
+                    if reason in rejected:
+                        rejected[reason] += 1
+                    elif reason == "http_404":
+                        rejected["not_found"] += 1
+                    else:
+                        rejected["other"] += 1
+                    # 401/403 nesta validação significa que a API não permite
+                    # confirmar os anúncios individualmente. A busca de catálogo
+                    # será tentada abaixo.
+                    if reason in ("http_401", "http_403"):
+                        listing_search_error = reason
+                        break
+                    continue
+
+                seller = checked.get("seller") or candidate.get("seller") or {}
+                shipping = checked.get("shipping") or candidate.get("shipping") or {}
+                current_price = number(checked.get("price"))
+                old_price = number(checked.get("original_price"))
+                if old_price is None:
+                    old_price = number(candidate.get("original_price"))
+
+                items.append({
+                    "name": checked.get("title") or candidate.get("title") or "Produto Mercado Livre",
+                    "store": str(seller.get("nickname") or "Mercado Livre"),
+                    "product_id": checked.get("catalog_product_id") or candidate.get("catalog_product_id"),
+                    "catalog_product_id": checked.get("catalog_product_id") or candidate.get("catalog_product_id"),
+                    "status": "active",
+                    "catalog_status": "active" if checked.get("catalog_product_id") else None,
+                    "domain_id": checked.get("domain_id") or candidate.get("domain_id"),
+                    "url": checked.get("permalink") or candidate.get("permalink"),
+                    "image_url": checked.get("secure_thumbnail") or checked.get("thumbnail") or candidate.get("thumbnail"),
+                    "current_price": current_price,
+                    "old_price": old_price,
+                    "discount_rate": discount_percent(current_price, old_price),
+                    "item_id": checked.get("id") or item_id,
+                    "seller_id": checked.get("seller_id") or seller.get("id"),
+                    "seller_reputation": seller.get("reputation_level_id"),
+                    "shipping": shipping,
+                    "buy_box_winner": False,
+                    "available_quantity": number(checked.get("available_quantity")),
+                    "sold_quantity": number(checked.get("sold_quantity")),
+                    "condition": checked.get("condition") or candidate.get("condition"),
+                    "data_confidence": "alta",
+                    "source_type": "listing_active",
+                })
+
+            if items:
+                return {
+                    "query": query,
+                    "source": "mercadolivre_active_listings",
+                    "total_candidates": (search.get("paging") or {}).get("total", len(results)),
+                    "returned": len(items),
+                    "items": items,
+                    "message": "Foram exibidos somente anúncios ativos, com preço atual confirmado no Mercado Livre.",
+                }
+
+            if not listing_search_error:
+                # A busca funcionou, mas não havia anúncio comprável entre os
+                # candidatos. Isso é diferente de um erro de autenticação.
+                listing_search_error = "no_valid_active_listing"
+        elif response.status_code in (401, 403):
+            listing_search_error = f"http_{response.status_code}"
+        else:
+            listing_search_error = f"http_{response.status_code}"
+    except requests.RequestException as exc:
+        listing_search_error = f"request_error:{exc}"
+
+    # ---------------------------------------------------------------
+    # FONTE 2: catálogo ativo + publicação vencedora/fallback de anúncios.
+    # ---------------------------------------------------------------
+    try:
+        response, search = request_json(
             "https://api.mercadolibre.com/products/search",
             params={
                 "status": "active",
                 "site_id": "MLB",
                 "q": query,
-                # Mais candidatos que o limite final, porque alguns produtos
-                # ativos podem não ter nenhuma publicação comprável.
                 "limit": min(50, max(limit * 4, 20)),
             },
             timeout=20,
-        ) or {}
+        )
 
+        if response.status_code in (401, 403):
+            detail = response.text[:700]
+            raise HTTPException(
+                502,
+                "O Mercado Livre recusou a busca autenticada do catálogo "
+                f"({response.status_code}). A busca de anúncios também não encontrou "
+                f"uma publicação comprável. Detalhe: {detail}",
+            )
+        response.raise_for_status()
+
+        results = search.get("results") or []
         items = []
         discarded = {
             "inactive_catalog": 0,
             "no_buy_box": 0,
             "used_listing_fallback": 0,
-            "no_item_id": 0,
             "item_unavailable": 0,
             "no_price": 0,
             "errors": 0,
         }
 
-        raw_results = (search.get("results") or [])[:min(50, max(limit * 4, 20))]
-
-        for x in raw_results:
+        for candidate in results:
             if len(items) >= limit:
                 break
 
-            product_id = x.get("id") or x.get("catalog_product_id")
+            product_id = candidate.get("id") or candidate.get("catalog_product_id")
             if not product_id:
-                discarded["no_item_id"] += 1
                 continue
 
-            try:
-                detail = get_json(
-                    f"https://api.mercadolibre.com/products/{product_id}",
-                    timeout=12,
-                    allow_404=True,
-                ) or {}
-            except (requests.RequestException, HTTPException):
+            # Detalhe do produto de catálogo para obter o buy_box_winner atual.
+            detail_response, detail = request_json(
+                f"https://api.mercadolibre.com/products/{product_id}",
+                timeout=12,
+            )
+            if detail_response.status_code in (401, 403):
+                discarded["errors"] += 1
+                continue
+            if not detail_response.ok or not isinstance(detail, dict):
                 discarded["errors"] += 1
                 continue
 
-            catalog_status = str(detail.get("status") or x.get("status") or "").lower()
+            catalog_status = str(detail.get("status") or candidate.get("status") or "").lower()
             if catalog_status != "active":
                 discarded["inactive_catalog"] += 1
                 continue
 
-            # 1) Tenta primeiro o vencedor do catálogo.
-            candidate_list = []
             winner = detail.get("buy_box_winner") or {}
-            if winner.get("item_id"):
-                candidate_list.append(winner)
-            else:
+            candidates = [winner] if winner.get("item_id") else []
+            if not candidates:
                 discarded["no_buy_box"] += 1
-
-            # 2) Se não houver vencedor, procura publicações reais do PDP.
-            # Isso é importante: um produto de catálogo pode estar ativo sem
-            # ter buy_box_winner, mas ainda possuir anúncios compráveis.
-            if not candidate_list:
                 try:
-                    listing_data = get_json(
+                    listing_response, listing_data = request_json(
                         f"https://api.mercadolibre.com/products/{product_id}/items",
                         params={"limit": 10},
                         timeout=12,
-                        allow_404=True,
-                    ) or {}
-                    candidate_list = listing_data.get("results") or []
-                    if candidate_list:
-                        discarded["used_listing_fallback"] += 1
-                except (requests.RequestException, HTTPException):
-                    discarded["errors"] += 1
-                    candidate_list = []
+                    )
+                    if listing_response.ok:
+                        candidates = listing_data.get("results") or []
+                        if candidates:
+                            discarded["used_listing_fallback"] += 1
+                except requests.RequestException:
+                    pass
 
-            if not candidate_list:
+            if not candidates:
                 continue
 
-            # Preferimos candidatos com preço conhecido e, entre eles, o menor
-            # preço. Depois validamos o anúncio no endpoint /items.
-            candidate_list = sorted(
-                candidate_list,
-                key=lambda c: number(c.get("price")) if number(c.get("price")) is not None else float("inf")
+            # Menor preço primeiro, sem confiar apenas no preço de catálogo.
+            candidates = sorted(
+                candidates,
+                key=lambda c: number(c.get("price")) if number(c.get("price")) is not None else float("inf"),
             )
 
-            validated = None
-            chosen_candidate = None
-            for candidate in candidate_list[:5]:
-                item_id = candidate.get("item_id") or candidate.get("id")
-                if not item_id:
-                    continue
-                try:
-                    checked = validate_item(item_id, candidate)
-                except (requests.RequestException, HTTPException):
-                    checked = None
+            chosen = None
+            checked_item = None
+            for c in candidates[:5]:
+                item_id = c.get("item_id") or c.get("id")
+                checked, reason = validate_item(item_id)
                 if checked:
-                    validated = checked
-                    chosen_candidate = candidate
+                    checked_item = checked
+                    chosen = c
                     break
 
-            if not validated:
+            if not checked_item:
                 discarded["item_unavailable"] += 1
                 continue
 
-            item_detail = validated["item"]
-            current_price = validated["current_price"]
-            original_price = validated["original_price"]
-            item_id = item_detail.get("id") or chosen_candidate.get("item_id")
-            seller_id = item_detail.get("seller_id") or chosen_candidate.get("seller_id")
-            seller_reputation = (item_detail.get("seller") or {}).get("reputation_level_id")
-            shipping = item_detail.get("shipping") or chosen_candidate.get("shipping") or {}
+            current_price = number(checked_item.get("price"))
+            old_price = number(checked_item.get("original_price"))
+            if old_price is None:
+                old_price = number((chosen or {}).get("original_price"))
+            if current_price is None or current_price <= 0:
+                discarded["no_price"] += 1
+                continue
 
-            image_url = item_detail.get("secure_thumbnail") or item_detail.get("thumbnail")
-            if not image_url:
-                pictures = detail.get("pictures") or x.get("pictures") or []
-                if pictures and isinstance(pictures[0], dict):
-                    image_url = pictures[0].get("secure_url") or pictures[0].get("url")
-            if not image_url:
-                image_url = x.get("thumbnail") or x.get("picture")
-
-            url = (
-                item_detail.get("permalink")
-                or chosen_candidate.get("permalink")
-                or detail.get("permalink")
-                or x.get("permalink")
-            )
-            if not url and item_id:
-                url = f"https://www.mercadolivre.com.br/MLB-{item_id.replace('MLB', '')}"
-
-            discount_rate = discount_percent(current_price, original_price)
-            sold_quantity = number(item_detail.get("sold_quantity"))
+            seller = checked_item.get("seller") or {}
+            shipping = checked_item.get("shipping") or (chosen or {}).get("shipping") or {}
+            item_id = checked_item.get("id") or (chosen or {}).get("item_id")
 
             items.append({
-                "name": item_detail.get("title") or detail.get("name") or x.get("name") or "Produto Mercado Livre",
-                "store": str((item_detail.get("seller") or {}).get("nickname") or "Mercado Livre"),
+                "name": checked_item.get("title") or detail.get("name") or candidate.get("name") or "Produto Mercado Livre",
+                "store": str(seller.get("nickname") or "Mercado Livre"),
                 "product_id": product_id,
                 "catalog_product_id": product_id,
                 "status": "active",
                 "catalog_status": catalog_status,
-                "domain_id": detail.get("domain_id") or x.get("domain_id"),
-                "url": url,
-                "image_url": image_url,
+                "domain_id": detail.get("domain_id") or candidate.get("domain_id"),
+                "url": checked_item.get("permalink") or (chosen or {}).get("permalink") or detail.get("permalink"),
+                "image_url": checked_item.get("secure_thumbnail") or checked_item.get("thumbnail") or candidate.get("thumbnail"),
                 "current_price": current_price,
-                "old_price": original_price,
-                "discount_rate": discount_rate,
+                "old_price": old_price,
+                "discount_rate": discount_percent(current_price, old_price),
                 "item_id": item_id,
-                "seller_id": seller_id,
-                "seller_reputation": seller_reputation,
+                "seller_id": checked_item.get("seller_id") or (chosen or {}).get("seller_id"),
+                "seller_reputation": seller.get("reputation_level_id"),
                 "shipping": shipping,
                 "buy_box_winner": bool(winner.get("item_id") and item_id == winner.get("item_id")),
-                "available_quantity": validated["available_quantity"],
-                "sold_quantity": sold_quantity,
-                "condition": item_detail.get("item_condition") or item_detail.get("condition") or chosen_candidate.get("condition"),
+                "available_quantity": number(checked_item.get("available_quantity")),
+                "sold_quantity": number(checked_item.get("sold_quantity")),
+                "condition": checked_item.get("condition") or (chosen or {}).get("condition"),
                 "data_confidence": "alta",
+                "source_type": "catalog_active_listing",
             })
 
         return {
             "query": query,
             "source": "mercadolivre_catalog_active_listings",
-            "total_catalog_candidates": (search.get("paging") or {}).get("total", len(raw_results)),
+            "total_catalog_candidates": (search.get("paging") or {}).get("total", len(results)),
             "returned": len(items),
-            "discarded": discarded,
             "items": items,
+            "discarded": discarded,
+            "listing_source_status": listing_search_error,
             "message": (
-                "Foram exibidos somente anúncios ativos, com publicação real e preço atual informado."
+                "Foram exibidos somente anúncios ativos, com publicação real e preço atual confirmado."
                 if items else
-                "O catálogo retornou produtos, mas nenhum anúncio ativo com preço pôde ser confirmado agora."
+                "O Mercado Livre encontrou candidatos de catálogo, mas nenhum anúncio ativo com preço pôde ser confirmado agora."
             ),
         }
 
