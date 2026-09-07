@@ -950,6 +950,29 @@ def _best_product_url(item):
     return None
 
 
+def _product_from_item(token, item_id, rank_position=None, query=''):
+    if not item_id: return None
+    try:
+        data,status=_meli_get(token,f'https://api.mercadolibre.com/items/{item_id}',timeout=8)
+        if not isinstance(data,dict): return None
+        status_item=str(data.get('status') or '').lower()
+        permalink=data.get('permalink')
+        if status_item and status_item not in ('active','paused'): return None
+        if not (isinstance(permalink,str) and permalink.startswith(('http://','https://'))): return None
+        price=_price_number(data.get('price'))
+        if not price or price<=0: return None
+        title=data.get('title') or 'Produto Mercado Livre'
+        if _looks_like_accessory(title): return None
+        old=_price_number(data.get('original_price'))
+        seller=data.get('seller') or {}
+        image=data.get('secure_thumbnail') or data.get('thumbnail')
+        p={'name':title,'store':str(seller.get('nickname') or 'Mercado Livre'),'marketplace':'mercadolivre','product_id':data.get('catalog_product_id'),'catalog_product_id':data.get('catalog_product_id'),'item_id':data.get('id') or item_id,'seller_id':data.get('seller_id') or seller.get('id'),'url':permalink,'image_url':image,'current_price':price,'old_price':old,'discount_rate':round((old-price)/old*100,2) if old and old>price else None,'category':data.get('category_id'),'rating':None,'condition':data.get('condition'),'rank_position':rank_position,'discovery_query':query,'data_confidence':'alta'}
+        p['opportunity_score']=_opportunity_score(p); p['opportunity_label']=_opportunity_label(p['opportunity_score'])
+        return p
+    except Exception:
+        return None
+
+
 def _product_from_catalog(token, catalog_item, rank_position=None, query=''):
     pid=catalog_item.get('id') or catalog_item.get('catalog_product_id')
     if not pid: return None
@@ -1022,7 +1045,7 @@ def mercadolivre_opportunities(payload: dict):
 
     from concurrent.futures import ThreadPoolExecutor,as_completed
     categories=['MLB1000','MLB1055','MLB1246','MLB1430','MLB1574','MLB1276','MLB1144','MLB1132']
-    catalog=[]; seen=set(); diagnostics={'highlights':0,'catalog_details':0,'products':0}
+    catalog=[]; seen=set(); diagnostics={'highlights':0,'catalog_details':0,'products':0,'valid_links':0}
 
     # V8.1 fazia estas 8 chamadas uma após outra. Agora são simultâneas.
     def fetch_highlight(cat):
@@ -1037,11 +1060,12 @@ def mercadolivre_opportunities(payload: dict):
             if not data: continue
             diagnostics['highlights']+=1
             for x in data.get('content') or []:
-                if x.get('type') not in ('PRODUCT','ITEM','USER_PRODUCT'): continue
+                typ=x.get('type')
+                if typ not in ('PRODUCT','ITEM'): continue
                 iid=x.get('id'); pos=x.get('position')
-                key=(iid,pos)
+                key=(typ,iid)
                 if iid and key not in seen:
-                    seen.add(key); catalog.append(({'id':iid},pos,'highlights'))
+                    seen.add(key); catalog.append(({'id':iid,'highlight_type':typ},pos,'highlights'))
 
     # Pesquisa direcionada somente quando o usuário informou um nicho.
     if niche:
@@ -1083,7 +1107,10 @@ def mercadolivre_opportunities(payload: dict):
     candidate_cap=max(24,min(48,limit*4))
     products=[]
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futs=[pool.submit(_product_from_catalog,token,x,pos,q) for x,pos,q in catalog[:candidate_cap]]
+        def resolve_candidate(x,pos,q):
+            if x.get('highlight_type')=='ITEM': return _product_from_item(token,x.get('id'),pos,q)
+            return _product_from_catalog(token,x,pos,q)
+        futs=[pool.submit(resolve_candidate,x,pos,q) for x,pos,q in catalog[:candidate_cap]]
         for f in as_completed(futs):
             try:
                 p=f.result()
@@ -1094,8 +1121,9 @@ def mercadolivre_opportunities(payload: dict):
 
     if niche:
         products=[p for p in products if _relevance_score(niche,p.get('name',''),p.get('category',''))>=0.5]
-    uniq={p.get('item_id') or p.get('product_id'):p for p in products if p.get('item_id') or p.get('product_id')}
-    products=list(uniq.values())
+    products=[p for p in products if p.get('item_id') and isinstance(p.get('url'),str) and p.get('url','').startswith(('http://','https://'))]
+    uniq={p.get('item_id'):p for p in products if p.get('item_id')}
+    products=list(uniq.values()); diagnostics['valid_links']=len(products)
     products.sort(key=lambda p:(-float(p.get('opportunity_score') or 0),float(p.get('rank_position') or 999),-float(p.get('discount_rate') or 0)))
     selected=products[:limit]
     return {'mode':'opportunities','niche':niche or 'todos','items':selected,'returned':len(selected),'diagnostic':diagnostics,
