@@ -19,12 +19,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from supabase import create_client
 
-# V9.3 — log estruturado para rastrear todo o caminho da descoberta.
+# V9.5 — log estruturado para rastrear todo o caminho da descoberta.
 # O Render captura stdout/stderr automaticamente. Nenhum token é registrado.
 logger = logging.getLogger("oferta_ia.v9")
 if not logger.handlers:
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s | V9.3 | %(levelname)s | %(message)s"))
+    handler.setFormatter(logging.Formatter("%(asctime)s | V9.5 | %(levelname)s | %(message)s"))
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
@@ -1459,29 +1459,113 @@ def _v9_valid_meli_token():
         return None
 
 
-def _v9_fetch_json(token, url, params=None, timeout=10):
-    """GET seguro para o Mercado Livre, com uma tentativa de renovação."""
+def _v9_fetch_json(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
+    """GET Mercado Livre com diagnóstico detalhado e renovação em 401."""
+    started = time.time()
+    safe_params = dict(params or {})
+    for secret_key in ("access_token", "refresh_token", "client_secret", "client_id"):
+        safe_params.pop(secret_key, None)
+
+    _v93_log(
+        stage,
+        "Requisição iniciada",
+        trace=trace,
+        method="GET",
+        url=url,
+        params=json.dumps(safe_params, ensure_ascii=False, separators=(",", ":")),
+    )
+
+    last_response = None
     for attempt in range(2):
-        r = requests.get(
-            url,
-            params=params or {},
-            headers=_meli_headers(token),
-            timeout=timeout,
-        )
-        if r.status_code == 401 and attempt == 0:
-            fresh = _v9_valid_meli_token()
-            if fresh and fresh != token:
-                token = fresh
-                continue
-        if r.status_code in (401, 403):
-            return None, r.status_code
-        if not r.ok:
-            return None, r.status_code
         try:
-            return r.json(), r.status_code
-        except Exception:
-            return None, r.status_code
-    return None, 401
+            r = requests.get(
+                url,
+                params=params or {},
+                headers=_meli_headers(token),
+                timeout=timeout,
+            )
+            last_response = r
+            elapsed = int((time.time() - started) * 1000)
+
+            try:
+                data = r.json()
+            except Exception:
+                data = {}
+
+            if isinstance(data, dict):
+                results = data.get("results")
+                results_count = len(results) if isinstance(results, list) else None
+                message = data.get("message") or data.get("error") or data.get("cause")
+                keys = list(data.keys())[:20]
+                paging = data.get("paging")
+            elif isinstance(data, list):
+                results_count = len(data)
+                message = None
+                keys = ["<list>"]
+                paging = None
+            else:
+                results_count = None
+                message = None
+                keys = []
+                paging = None
+
+            _v93_log(
+                stage,
+                "Resposta recebida",
+                trace=trace,
+                attempt=attempt + 1,
+                http=r.status_code,
+                ok=r.ok,
+                elapsed_ms=elapsed,
+                results=results_count,
+                response_keys=",".join(map(str, keys)),
+                message=str(message)[:300] if message else "",
+                paging=json.dumps(paging, ensure_ascii=False)[:500] if paging else "",
+            )
+
+            if r.status_code == 401 and attempt == 0:
+                _v93_log("AUTH", "HTTP 401 — tentando renovar token", trace=trace)
+                fresh = _v9_valid_meli_token()
+                if fresh and fresh != token:
+                    token = fresh
+                    _v93_log("AUTH", "Token renovado; repetindo requisição", trace=trace)
+                    continue
+
+            if not r.ok:
+                _v93_log(
+                    "ERROR",
+                    "Mercado Livre retornou erro HTTP",
+                    trace=trace,
+                    http=r.status_code,
+                    error=str(message or r.text[:300])[:500],
+                )
+                return None, r.status_code
+
+            return data, r.status_code
+
+        except requests.RequestException as exc:
+            elapsed = int((time.time() - started) * 1000)
+            _v93_log(
+                "ERROR",
+                "Falha de rede",
+                trace=trace,
+                elapsed_ms=elapsed,
+                error=str(exc)[:500],
+            )
+            return None, None
+
+        except Exception as exc:
+            elapsed = int((time.time() - started) * 1000)
+            _v93_log(
+                "ERROR",
+                "Falha ao interpretar resposta",
+                trace=trace,
+                elapsed_ms=elapsed,
+                error=str(exc)[:500],
+            )
+            return None, None
+
+    return None, getattr(last_response, "status_code", None)
 
 
 def _v9_get_item(token, item_id):
@@ -1595,7 +1679,7 @@ def _v9_trends(token, category_id=None):
     path = "https://api.mercadolibre.com/trends/MLB"
     if category_id:
         path += f"/{category_id}"
-    data, _ = _v9_fetch_json(token, path, timeout=8)
+    data, _ = _v9_fetch_json(token, path, timeout=8, trace=trace, stage="TRENDS")
     return data if isinstance(data, list) else []
 
 
@@ -1721,7 +1805,7 @@ def _v9_analyze(item, rank_position=None, trend_rank=None, commission_rate=None)
 
 @app.post("/api/v9/opportunities")
 def v9_opportunities(payload: dict):
-    """V9.3: garimpo com diagnóstico por etapa e erros visíveis no log do Render."""
+    """V9.5: garimpo com diagnóstico por etapa e erros visíveis no log do Render."""
     global _V93_LAST_DIAGNOSTIC, _V94_LOG_BUFFER
     _V94_LOG_BUFFER = []
     trace = uuid.uuid4().hex[:8]
@@ -1842,13 +1926,54 @@ def v9_opportunities(payload: dict):
     _V93_LAST_DIAGNOSTIC = diag
     _v93_log("END", "Garimpo encerrado", trace=trace, final=len(selected), elapsed_ms=diag["elapsed_ms"])
     message = f"{len(selected)} oportunidade(s) encontrada(s). Rastreamento {trace}." if selected else f"Nenhuma oportunidade passou. Rastreamento {trace}."
-    return {"status":"ok","engine":"OFERTA IA V9.4","mode":"opportunities","niche":niche or "todos","items":selected,"opportunities":selected,"returned":len(selected),"candidates_found":len(raw_candidates),"validated":len(products),"diagnostic":diag,"message":message,"cached":False}
+    return {"status":"ok","engine":"OFERTA IA V9.5","mode":"opportunities","niche":niche or "todos","items":selected,"opportunities":selected,"returned":len(selected),"candidates_found":len(raw_candidates),"validated":len(products),"diagnostic":diag,"message":message,"cached":False}
+
+@app.get("/api/v9/search-diagnostic")
+def v9_search_diagnostic(q: str = "air fryer"):
+    """Testa uma busca /sites/MLB/search isoladamente, sem gravar produtos."""
+    global _V94_LOG_BUFFER
+    _V94_LOG_BUFFER = []
+
+    trace = "SEARCH-" + uuid.uuid4().hex[:8]
+    _v93_log("START", "Diagnóstico isolado da busca", trace=trace, query=q)
+
+    token = _v9_valid_meli_token()
+    if not token:
+        _v93_log("AUTH", "Token indisponível", trace=trace)
+        return {"ok": False, "trace_id": trace, "log": _v94_log_text()}
+
+    _v93_log("AUTH", "Token válido", trace=trace)
+
+    data, status = _v9_fetch_json(
+        token,
+        "https://api.mercadolibre.com/sites/MLB/search",
+        {"q": q, "limit": 10},
+        timeout=15,
+        trace=trace,
+        stage="SEARCH",
+    )
+
+    result_count = len(data.get("results") or []) if isinstance(data, dict) else 0
+    result = {
+        "ok": status == 200,
+        "trace_id": trace,
+        "query": q,
+        "http_status": status,
+        "results": result_count,
+        "response_keys": list(data.keys())[:20] if isinstance(data, dict) else [],
+        "message": (data.get("message") or data.get("error") or "") if isinstance(data, dict) else "",
+        "paging": data.get("paging") if isinstance(data, dict) else None,
+    }
+
+    _v93_log("END", "Diagnóstico isolado encerrado", trace=trace, results=result_count)
+    result["log"] = _v94_log_text()
+    return result
 
 @app.get("/api/v9/diagnostic")
 def v9_diagnostic():
     return {
         "status": "ok",
-        "engine": "OFERTA IA V9.4",
+        "engine": "OFERTA IA V9.5",
         "diagnostic": _V93_LAST_DIAGNOSTIC,
         "log": _v94_log_text(),
     }
