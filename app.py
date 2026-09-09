@@ -1319,7 +1319,9 @@ def _v9_confidence(item):
     if item.get("commission_rate") is None: score -= 8
     return round(max(0, min(100, score)), 2)
 
+
 def _v9_fetch_json(token, url, params=None, timeout=10):
+    """GET seguro para o Mercado Livre."""
     r = requests.get(
         url,
         params=params or {},
@@ -1335,28 +1337,34 @@ def _v9_fetch_json(token, url, params=None, timeout=10):
     except Exception:
         return None, r.status_code
 
+
 def _v9_get_item(token, item_id):
-    data, status = _v9_fetch_json(
-        token, f"https://api.mercadolibre.com/items/{item_id}", timeout=10
+    """Obtém uma publicação real e ativa."""
+    data, _ = _v9_fetch_json(
+        token, f"https://api.mercadolibre.com/items/{item_id}", timeout=8
     )
     if not isinstance(data, dict):
         return None
 
-    permalink = data.get("permalink")
-    price = _v9_num(data.get("price"))
     if data.get("status") != "active":
         return None
+
+    permalink = data.get("permalink")
     if not permalink or not str(permalink).startswith("http"):
         return None
+
+    price = _v9_num(data.get("price"))
     if price is None or price <= 0:
         return None
 
+    old = _v9_num(data.get("original_price"))
     return {
         "item_id": data.get("id"),
         "name": data.get("title") or "Produto Mercado Livre",
         "url": permalink,
         "current_price": price,
-        "old_price": _v9_num(data.get("original_price")),
+        "old_price": old,
+        "discount_rate": round((old-price)/old*100, 2) if old and old > price else None,
         "category": data.get("category_id"),
         "image_url": data.get("secure_thumbnail") or data.get("thumbnail"),
         "seller_id": data.get("seller_id"),
@@ -1364,125 +1372,82 @@ def _v9_get_item(token, item_id):
         "marketplace": "mercadolivre",
     }
 
+
 def _v9_catalog_to_item(token, product_id, rank_position=None, query=""):
+    """
+    Converte PRODUCT/USER_PRODUCT do ranking em uma publicação ITEM real.
+    Primeiro tenta o buy_box_winner; depois lista publicações do produto;
+    por fim valida cada item diretamente em /items/{id}.
+    """
     detail, _ = _v9_fetch_json(
-        token, f"https://api.mercadolibre.com/products/{product_id}", timeout=10
+        token, f"https://api.mercadolibre.com/products/{product_id}", timeout=8
     )
     if not isinstance(detail, dict):
         return None
 
-    candidates = []
+    item_ids = []
+
     winner = detail.get("buy_box_winner")
     if isinstance(winner, dict):
-        candidates.append(winner)
+        iid = winner.get("item_id") or winner.get("id")
+        if iid:
+            item_ids.append(iid)
 
-    if not candidates:
-        data, _ = _v9_fetch_json(
-            token,
-            f"https://api.mercadolibre.com/products/{product_id}/items",
-            {"limit": 10},
-            timeout=10,
-        )
-        if isinstance(data, dict):
-            candidates = data.get("results") or data.get("items") or data.get("publications") or []
-
-    best = None
-    for c in candidates:
-        if not isinstance(c, dict):
-            continue
-        iid = c.get("item_id") or c.get("id")
-        title = c.get("title") or detail.get("name") or ""
-        price = _v9_num(c.get("price"))
-        permalink = c.get("permalink")
-        if iid and price and price > 0 and permalink and str(permalink).startswith("http"):
-            if not _looks_like_accessory(title):
-                if best is None or price < _v9_num(best.get("price"), 10**12):
-                    best = c
-
-    if not best:
-        return None
-
-    old = _v9_num(best.get("original_price"))
-    cur = _v9_num(best.get("price"))
-    image = best.get("secure_thumbnail") or best.get("thumbnail")
-    if not image:
-        pics = detail.get("pictures") or []
-        if pics and isinstance(pics[0], dict):
-            image = pics[0].get("secure_url") or pics[0].get("url")
-
-    return {
-        "item_id": best.get("item_id") or best.get("id"),
-        "name": best.get("title") or detail.get("name") or "Produto Mercado Livre",
-        "url": best.get("permalink"),
-        "current_price": cur,
-        "old_price": old,
-        "discount_rate": round((old-cur)/old*100, 2) if old and cur and old > cur else None,
-        "category": detail.get("domain_id") or best.get("category_id"),
-        "image_url": image,
-        "seller_id": best.get("seller_id") or (best.get("seller") or {}).get("id"),
-        "marketplace": "mercadolivre",
-        "rank_position": rank_position,
-        "discovery_query": query,
-        "rating": None,
-    }
-
-def _v9_analyze(item, rank_position=None, trend_rank=None, commission_rate=None):
-    p = dict(item)
-    price = _v9_num(p.get("current_price"))
-    old = _v9_num(p.get("old_price"))
-    discount = _v9_num(p.get("discount_rate"))
-    if discount is None and old and price and old > price:
-        discount = round((old-price)/old*100, 2)
-
-    demand = _v9_demand_score(rank_position, _v9_trend_score(trend_rank))
-    commission = _v9_commission_score(commission_rate)
-
-    # Não inventamos a concorrência. Enquanto não houver fonte real de
-    # concorrência de afiliados, o índice fica explicitamente estimado/neutro.
-    competition_index = 50.0
-    low_competition = 100.0 - competition_index
-
-    dscore = _v9_discount_score(discount)
-    pscore = _v9_price_score(price)
-    rscore = _v9_rating_score(p.get("rating"))
-    tscore = _v9_trend_score(trend_rank)
-    potential = _v9_potential_score(demand, commission, dscore, pscore, rscore, tscore)
-
-    score = (
-        demand*.25 + commission*.20 + low_competition*.20 +
-        dscore*.10 + pscore*.10 + rscore*.05 +
-        tscore*.05 + potential*.05
+    data, _ = _v9_fetch_json(
+        token,
+        f"https://api.mercadolibre.com/products/{product_id}/items",
+        {"limit": 20},
+        timeout=8,
     )
+    if isinstance(data, dict):
+        for row in (data.get("results") or data.get("items") or data.get("publications") or []):
+            if isinstance(row, dict):
+                iid = row.get("item_id") or row.get("id")
+            else:
+                iid = row
+            if iid:
+                item_ids.append(iid)
 
-    p.update({
-        "commission_rate": commission_rate,
-        "commission_value": round(price*float(commission_rate)/100, 2) if price and commission_rate is not None else None,
-        "discount_rate": discount,
-        "rank_position": rank_position,
-        "trend_rank": trend_rank,
-        "demand_score": round(demand, 2),
-        "commission_score": round(commission, 2),
-        "competition_index": competition_index,
-        "competition_score": round(low_competition, 2),
-        "competition_estimated": True,
-        "discount_score": round(dscore, 2),
-        "price_score": round(pscore, 2),
-        "rating_score": round(rscore, 2),
-        "trend_score": round(tscore, 2),
-        "potential_score": round(potential, 2),
-        "opportunity_score": round(score, 2),
-        "marketplace": "mercadolivre",
-    })
-    p["data_confidence"] = _v9_confidence(p)
-    p["classification"], p["classification_key"] = _v9_classification(p["opportunity_score"])
-    return p
+    # Alguns formatos de catálogo podem devolver o item dentro do winner.
+    for iid in item_ids:
+        item = _v9_get_item(token, str(iid))
+        if not item:
+            continue
+        if _looks_like_accessory(item.get("name", "")):
+            continue
+        item["rank_position"] = rank_position
+        item["discovery_query"] = query
+        item["catalog_product_id"] = product_id
+        return item
+
+    return None
+
+
+def _v9_search_listings(token, query, limit=20, sort=None, category_id=None):
+    """Busca publicações reais no marketplace."""
+    params = {"q": query, "limit": max(1, min(50, int(limit or 20)))}
+    if sort:
+        params["sort"] = sort
+    if category_id:
+        params["category"] = category_id
+
+    # IMPORTANTE: domínio correto é mercadolibre.com.
+    data, _ = _v9_fetch_json(
+        token,
+        "https://api.mercadolibre.com/sites/MLB/search",
+        params,
+        timeout=8,
+    )
+    return data.get("results", []) if isinstance(data, dict) else []
+
 
 def _v9_trends(token, category_id=None):
-    path = f"https://api.mercadolibre.com/trends/MLB"
+    path = "https://api.mercadolibre.com/trends/MLB"
     if category_id:
         path += f"/{category_id}"
-    data, _ = _v9_fetch_json(token, path, timeout=10)
+    data, _ = _v9_fetch_json(token, path, timeout=8)
     return data if isinstance(data, list) else []
+
 
 def _v9_trend_rank_for_name(name, trends):
     nt = _norm_text(name)
@@ -1503,6 +1468,107 @@ def _v9_trend_rank_for_name(name, trends):
                 best = (idx, overlap)
     return best[0] if best else None
 
+
+def _v9_seed_queries(niche, trends, max_queries=8):
+    """
+    Gera consultas de descoberta sem depender de categorias-pai.
+    Tendências são uma fonte oficial de demanda/popularidade.
+    """
+    queries = []
+    if niche:
+        queries.append(niche)
+        parts = _tokens(niche)
+        queries.extend(parts[:3])
+    else:
+        # /trends retorna até 50 termos populares; usamos uma amostra curta
+        # para manter o tempo de resposta adequado.
+        for row in trends[:max_queries]:
+            kw = (row or {}).get("keyword")
+            if kw:
+                queries.append(str(kw))
+
+        # Fallback caso a API de trends esteja temporariamente indisponível.
+        if not queries:
+            queries = [
+                "celular",
+                "air fryer",
+                "smartwatch",
+                "fone bluetooth",
+                "notebook",
+                "aspirador",
+                "beleza",
+                "casa",
+            ]
+
+    clean = []
+    seen = set()
+    for q in queries:
+        q = str(q).strip()
+        key = _norm_text(q)
+        if q and key and key not in seen:
+            seen.add(key)
+            clean.append(q)
+    return clean[:max_queries]
+
+
+def _v9_analyze(item, rank_position=None, trend_rank=None, commission_rate=None):
+    p = dict(item)
+    price = _v9_num(p.get("current_price"))
+    old = _v9_num(p.get("old_price"))
+    discount = _v9_num(p.get("discount_rate"))
+    if discount is None and old and price and old > price:
+        discount = round((old-price)/old*100, 2)
+
+    demand = _v9_demand_score(rank_position, _v9_trend_score(trend_rank))
+    commission = _v9_commission_score(commission_rate)
+
+    # Não inventamos concorrência. Até existir uma fonte real de
+    # concorrência de afiliados, o índice permanece estimado/neutro.
+    competition_index = 50.0
+    low_competition = 100.0 - competition_index
+
+    dscore = _v9_discount_score(discount)
+    pscore = _v9_price_score(price)
+    rscore = _v9_rating_score(p.get("rating"))
+    tscore = _v9_trend_score(trend_rank)
+    potential = _v9_potential_score(
+        demand, commission, dscore, pscore, rscore, tscore
+    )
+
+    score = (
+        demand*.25 + commission*.20 + low_competition*.20 +
+        dscore*.10 + pscore*.10 + rscore*.05 +
+        tscore*.05 + potential*.05
+    )
+
+    p.update({
+        "commission_rate": commission_rate,
+        "commission_value": (
+            round(price*float(commission_rate)/100, 2)
+            if price and commission_rate is not None else None
+        ),
+        "discount_rate": discount,
+        "rank_position": rank_position,
+        "trend_rank": trend_rank,
+        "demand_score": round(demand, 2),
+        "commission_score": round(commission, 2),
+        "competition_index": competition_index,
+        "competition_score": round(low_competition, 2),
+        "competition_estimated": True,
+        "discount_score": round(dscore, 2),
+        "price_score": round(pscore, 2),
+        "rating_score": round(rscore, 2),
+        "trend_score": round(tscore, 2),
+        "potential_score": round(potential, 2),
+        "opportunity_score": round(score, 2),
+        "marketplace": "mercadolivre",
+    })
+    p["data_confidence"] = _v9_confidence(p)
+    p["classification"], p["classification_key"] = _v9_classification(
+        p["opportunity_score"]
+    )
+    return p
+
 @app.post("/api/v9/opportunities")
 def v9_opportunities(payload: dict):
     token = (_get_connection("mercadolivre") or {}).get("access_token")
@@ -1511,119 +1577,175 @@ def v9_opportunities(payload: dict):
 
     niche = _canonical_query((payload.get("niche") or "").strip())
     try:
-        limit = max(5, min(20, int(payload.get("limit") or payload.get("quantity") or 10)))
+        limit = max(
+            5,
+            min(20, int(payload.get("limit") or payload.get("quantity") or 10))
+        )
     except Exception:
         limit = 10
 
     category_id = (payload.get("category_id") or "").strip() or None
-    cache_key = f"v9:{niche}:{category_id or 'all'}:{limit}"
+    cache_key = f"v9.1:{niche}:{category_id or 'all'}:{limit}"
     cached = _cache_get(cache_key)
     if cached:
         return {**cached, "cached": True}
 
-    candidates = []
-    seen = set()
+    # 1) Descoberta de demanda.
+    # Não dependemos de categorias-pai no /highlights, porque o ranking
+    # de mais vendidos é disponibilizado por categorias elegíveis.
+    trends = _v9_trends(token, category_id)
+    queries = _v9_seed_queries(niche, trends, max_queries=8)
 
-    # Categorias amplas já usadas pelo OFERTA IA. As consultas são paralelas.
-    categories = [category_id] if category_id else [
-        "MLB1000","MLB1055","MLB1246","MLB1430",
-        "MLB1574","MLB1276","MLB1144","MLB1132"
-    ]
+    raw_candidates = []
+    seen_items = set()
 
-    def fetch_cat(cat):
+    def collect_query(q):
+        rows = _v9_search_listings(
+            token,
+            q,
+            limit=max(12, min(25, limit * 2)),
+            sort=None,
+            category_id=category_id,
+        )
+        return q, rows
+
+    with ThreadPoolExecutor(max_workers=min(8, len(queries) or 1)) as pool:
+        for q, rows in pool.map(collect_query, queries):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                iid = row.get("id")
+                title = row.get("title") or ""
+                if not iid or iid in seen_items:
+                    continue
+                if _looks_like_accessory(title):
+                    continue
+
+                # Para nicho, mantemos apenas resultados semanticamente próximos.
+                if niche:
+                    rel = _relevance_score(
+                        niche,
+                        title,
+                        row.get("category_id") or "",
+                    )
+                    if rel < 0.35:
+                        continue
+
+                seen_items.add(iid)
+                raw_candidates.append({
+                    "item_id": iid,
+                    "query": q,
+                    "trend_rank": _v9_trend_rank_for_name(title, trends),
+                    "search_row": row,
+                })
+
+    # 2) Se houver categoria informada e a busca trouxe pouco, tentamos
+    # diretamente os mais vendidos daquela categoria.
+    if category_id and len(raw_candidates) < max(10, limit):
         data, _ = _v9_fetch_json(
             token,
-            f"https://api.mercadolibre.com/highlights/MLB/category/{cat}",
+            f"https://api.mercadolibre.com/highlights/MLB/category/{category_id}",
             timeout=8,
         )
-        return cat, data
+        for row in (data or {}).get("content", []) if isinstance(data, dict) else []:
+            if not isinstance(row, dict):
+                continue
+            rid = row.get("id")
+            typ = row.get("type")
+            pos = row.get("position")
+            if not rid:
+                continue
+            raw_candidates.append({
+                "item_id": rid,
+                "type": typ,
+                "rank_position": pos,
+                "query": f"category:{category_id}",
+                "trend_rank": None,
+            })
 
-    with ThreadPoolExecutor(max_workers=min(8, len(categories))) as pool:
-        for cat, data in pool.map(fetch_cat, categories):
-            for row in (data or {}).get("content", []) if isinstance(data, dict) else []:
-                typ = row.get("type")
-                rid = row.get("id")
-                pos = row.get("position")
-                if not rid or rid in seen:
-                    continue
-                if typ not in ("ITEM", "PRODUCT", "USER_PRODUCT"):
-                    continue
-                seen.add(rid)
-                candidates.append((rid, typ, pos, cat))
-
-    # Se um nicho foi informado, adicionamos candidatos específicos.
-    if niche:
-        queries = [niche] + _tokens(niche)[:2]
-        def search_query(q):
-            data, _ = _v9_fetch_json(
-                token,
-                "https://api.mercadolivre.com/sites/MLB/search",
-                {"q": q, "limit": 20},
-                timeout=8,
-            )
-            return q, (data or {}).get("results", []) if isinstance(data, dict) else []
-        with ThreadPoolExecutor(max_workers=min(3, len(queries))) as pool:
-            for q, rows in pool.map(search_query, list(dict.fromkeys(queries))):
-                for row in rows:
-                    iid = row.get("id")
-                    title = row.get("title") or ""
-                    if iid and iid not in seen and not _looks_like_accessory(title):
-                        if _relevance_score(niche, title, row.get("category_id") or "") >= 0.5:
-                            seen.add(iid)
-                            candidates.append((iid, "ITEM", None, q))
-
-    # Ranking primeiro: os melhores candidatos recebem o enriquecimento.
-    candidates.sort(key=lambda x: (999 if x[2] is None else int(x[2]), x[1]))
-    enrich = candidates[:min(len(candidates), max(limit*3, 24))]
-
-    trend_rows = _v9_trends(token, category_id)
+    # 3) Validação/enriquecimento. Para ITEM, valida direto.
+    # Para PRODUCT/USER_PRODUCT, converte para um item real.
+    enrich = raw_candidates[:max(limit * 4, 40)]
     products = []
 
-    def enrich_one(row):
-        rid, typ, pos, source = row
-        if typ == "ITEM":
-            item = _v9_get_item(token, rid)
-            return item, pos, source
-        item = _v9_catalog_to_item(token, rid, pos, source)
-        return item, pos, source
+    def enrich_one(candidate):
+        iid = candidate.get("item_id")
+        typ = candidate.get("type") or "ITEM"
+        pos = candidate.get("rank_position")
+        q = candidate.get("query") or ""
+
+        if typ in ("PRODUCT", "USER_PRODUCT"):
+            item = _v9_catalog_to_item(token, iid, pos, q)
+        else:
+            item = _v9_get_item(token, iid)
+
+        if not item:
+            return None
+
+        item["rank_position"] = pos
+        item["discovery_query"] = q
+
+        tr = candidate.get("trend_rank")
+        if tr is None:
+            tr = _v9_trend_rank_for_name(item.get("name", ""), trends)
+
+        return _v9_analyze(item, pos, tr, None)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(enrich_one, row) for row in enrich]
+        futures = [pool.submit(enrich_one, c) for c in enrich]
         for future in as_completed(futures):
             try:
-                item, pos, source = future.result()
-                if not item:
-                    continue
-                if niche and _relevance_score(niche, item.get("name",""), item.get("category","")) < 0.5:
-                    continue
-                tr = _v9_trend_rank_for_name(item.get("name",""), trend_rows)
-                products.append(_v9_analyze(item, pos, tr, None))
+                item = future.result()
+                if item:
+                    products.append(item)
             except Exception:
                 continue
 
+    # 4) Deduplicação por publicação real.
     unique = {}
     for p in products:
         key = p.get("item_id") or p.get("name")
-        if key and (key not in unique or float(p.get("opportunity_score") or 0) > float(unique[key].get("opportunity_score") or 0)):
+        if key and (
+            key not in unique
+            or float(p.get("opportunity_score") or 0)
+            > float(unique[key].get("opportunity_score") or 0)
+        ):
             unique[key] = p
 
     products = list(unique.values())
-    products.sort(key=lambda p: (
-        -float(p.get("opportunity_score") or 0),
-        float(p.get("rank_position") or 999),
-        -float(p.get("discount_rate") or 0)
-    ))
+    products.sort(
+        key=lambda p: (
+            -float(p.get("opportunity_score") or 0),
+            999 if p.get("trend_rank") is None else int(p.get("trend_rank")),
+            float(p.get("current_price") or 10**12),
+        )
+    )
+
     selected = products[:limit]
+
+    if selected:
+        message = (
+            f"{len(selected)} oportunidade(s) encontrada(s) "
+            f"após validar {len(enrich)} candidatos."
+        )
+    else:
+        message = (
+            "O Mercado Livre respondeu, mas nenhum anúncio ativo com "
+            "preço e link válidos passou na validação."
+        )
 
     result = {
         "status": "ok",
-        "engine": "OFERTA IA V9",
+        "engine": "OFERTA IA V9.1",
         "mode": "opportunities",
         "niche": niche or "todos",
         "items": selected,
         "opportunities": selected,
         "returned": len(selected),
-        "message": f"{len(selected)} oportunidade(s) encontrada(s) após analisar {len(enrich)} candidatos.",
+        "candidates_found": len(raw_candidates),
+        "validated": len(products),
+        "message": message,
         "cached": False,
     }
     return _cache_set(cache_key, result)
+
