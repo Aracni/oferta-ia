@@ -1320,22 +1320,96 @@ def _v9_confidence(item):
     return round(max(0, min(100, score)), 2)
 
 
-def _v9_fetch_json(token, url, params=None, timeout=10):
-    """GET seguro para o Mercado Livre."""
-    r = requests.get(
-        url,
-        params=params or {},
-        headers=_meli_headers(token),
-        timeout=timeout,
-    )
-    if r.status_code in (401, 403):
-        return None, r.status_code
-    if not r.ok:
-        return None, r.status_code
+
+def _v9_valid_meli_token():
+    """
+    Retorna um access_token válido.
+    O token do Mercado Livre expira; quando estiver próximo do vencimento,
+    troca automaticamente usando o refresh_token salvo no Supabase.
+    """
+    conn = _get_connection("mercadolivre") or {}
+    access = conn.get("access_token")
+    refresh = conn.get("refresh_token")
+    expires_at = conn.get("expires_at")
+
+    def expired_or_near(value):
+        if not value:
+            return True
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt <= datetime.now(timezone.utc) + timedelta(minutes=5)
+        except Exception:
+            return True
+
+    if access and not expired_or_near(expires_at):
+        return access
+
+    client_id, client_secret = _meli_credentials()
+    if not client_id or not client_secret or not refresh:
+        return None
+
     try:
-        return r.json(), r.status_code
+        response = requests.post(
+            "https://api.mercadolibre.com/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh,
+            },
+            timeout=15,
+        )
+        if not response.ok:
+            return None
+
+        token = response.json()
+        new_access = token.get("access_token")
+        new_refresh = token.get("refresh_token") or refresh
+        expires_in = int(token.get("expires_in") or 0)
+        new_expires = (
+            datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        ).isoformat() if expires_in else None
+
+        if not new_access:
+            return None
+
+        _save_connection("mercadolivre", {
+            "status": "connected",
+            "access_token": new_access,
+            "refresh_token": new_refresh,
+            "expires_at": new_expires,
+            "user_id": str(token.get("user_id") or conn.get("user_id") or ""),
+        })
+        return new_access
     except Exception:
-        return None, r.status_code
+        return None
+
+
+def _v9_fetch_json(token, url, params=None, timeout=10):
+    """GET seguro para o Mercado Livre, com uma tentativa de renovação."""
+    for attempt in range(2):
+        r = requests.get(
+            url,
+            params=params or {},
+            headers=_meli_headers(token),
+            timeout=timeout,
+        )
+        if r.status_code == 401 and attempt == 0:
+            fresh = _v9_valid_meli_token()
+            if fresh and fresh != token:
+                token = fresh
+                continue
+        if r.status_code in (401, 403):
+            return None, r.status_code
+        if not r.ok:
+            return None, r.status_code
+        try:
+            return r.json(), r.status_code
+        except Exception:
+            return None, r.status_code
+    return None, 401
 
 
 def _v9_get_item(token, item_id):
@@ -1571,9 +1645,12 @@ def _v9_analyze(item, rank_position=None, trend_rank=None, commission_rate=None)
 
 @app.post("/api/v9/opportunities")
 def v9_opportunities(payload: dict):
-    token = (_get_connection("mercadolivre") or {}).get("access_token")
+    token = _v9_valid_meli_token()
     if not token:
-        raise HTTPException(401, "Mercado Livre não está conectado.")
+        raise HTTPException(
+            401,
+            "Mercado Livre sem sessão válida. Conecte novamente o Mercado Livre."
+        )
 
     niche = _canonical_query((payload.get("niche") or "").strip())
     try:
@@ -1744,6 +1821,13 @@ def v9_opportunities(payload: dict):
         "returned": len(selected),
         "candidates_found": len(raw_candidates),
         "validated": len(products),
+        "diagnostic": {
+            "trends": len(trends),
+            "queries": len(queries),
+            "raw_candidates": len(raw_candidates),
+            "validated_products": len(products),
+            "token_refreshed_or_valid": bool(token),
+        },
         "message": message,
         "cached": False,
     }
