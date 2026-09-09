@@ -19,12 +19,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from supabase import create_client
 
-# V9.5 — log estruturado para rastrear todo o caminho da descoberta.
+# V9.6 — log estruturado para rastrear todo o caminho da descoberta.
 # O Render captura stdout/stderr automaticamente. Nenhum token é registrado.
 logger = logging.getLogger("oferta_ia.v9")
 if not logger.handlers:
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s | V9.5 | %(levelname)s | %(message)s"))
+    handler.setFormatter(logging.Formatter("%(asctime)s | V9.6 | %(levelname)s | %(message)s"))
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
@@ -1519,7 +1519,7 @@ def _v9_fetch_json(token, url, params=None, timeout=10, trace=None, stage="HTTP"
                 elapsed_ms=elapsed,
                 results=results_count,
                 response_keys=",".join(map(str, keys)),
-                message=str(message)[:300] if message else "",
+                api_message=str(message)[:300] if message else "",
                 paging=json.dumps(paging, ensure_ascii=False)[:500] if paging else "",
             )
 
@@ -1657,7 +1657,7 @@ def _v9_catalog_to_item(token, product_id, rank_position=None, query=""):
     return None
 
 
-def _v9_search_listings(token, query, limit=20, sort=None, category_id=None):
+def _v9_search_listings(token, query, limit=20, sort=None, category_id=None, trace=None):
     """Busca publicações reais no marketplace."""
     params = {"q": query, "limit": max(1, min(50, int(limit or 20)))}
     if sort:
@@ -1671,15 +1671,19 @@ def _v9_search_listings(token, query, limit=20, sort=None, category_id=None):
         "https://api.mercadolibre.com/sites/MLB/search",
         params,
         timeout=8,
+        trace=trace,
+        stage="SEARCH",
     )
     return data.get("results", []) if isinstance(data, dict) else []
 
 
-def _v9_trends(token, category_id=None):
+def _v9_trends(token, category_id=None, trace=None):
     path = "https://api.mercadolibre.com/trends/MLB"
     if category_id:
         path += f"/{category_id}"
-    data, _ = _v9_fetch_json(token, path, timeout=8, trace=trace, stage="TRENDS")
+    data, _ = _v9_fetch_json(
+        token, path, timeout=8, trace=trace, stage="TRENDS"
+    )
     return data if isinstance(data, list) else []
 
 
@@ -1805,7 +1809,7 @@ def _v9_analyze(item, rank_position=None, trend_rank=None, commission_rate=None)
 
 @app.post("/api/v9/opportunities")
 def v9_opportunities(payload: dict):
-    """V9.5: garimpo com diagnóstico por etapa e erros visíveis no log do Render."""
+    """V9.6: garimpo com diagnóstico por etapa e erros visíveis no log do Render."""
     global _V93_LAST_DIAGNOSTIC, _V94_LOG_BUFFER
     _V94_LOG_BUFFER = []
     trace = uuid.uuid4().hex[:8]
@@ -1839,7 +1843,7 @@ def v9_opportunities(payload: dict):
     trends = []
     try:
         diag["trends_requests"] += 1
-        trends = _v9_trends(token, category_id) or []
+        trends = _v9_trends(token, category_id, trace=trace) or []
         diag["trend_terms"] = len(trends)
         _v93_log("TRENDS", "Tendências carregadas", trace=trace, terms=len(trends))
     except Exception as exc:
@@ -1856,7 +1860,7 @@ def v9_opportunities(payload: dict):
     raw_candidates, seen_items = [], set()
     def collect_query(q):
         try:
-            rows = _v9_search_listings(token, q, limit=max(12, min(25, limit*2)), sort=None, category_id=category_id)
+            rows = _v9_search_listings(token, q, limit=max(12, min(25, limit*2)), sort=None, category_id=category_id, trace=trace)
             return q, rows, None
         except Exception as exc: return q, [], exc
 
@@ -1926,7 +1930,7 @@ def v9_opportunities(payload: dict):
     _V93_LAST_DIAGNOSTIC = diag
     _v93_log("END", "Garimpo encerrado", trace=trace, final=len(selected), elapsed_ms=diag["elapsed_ms"])
     message = f"{len(selected)} oportunidade(s) encontrada(s). Rastreamento {trace}." if selected else f"Nenhuma oportunidade passou. Rastreamento {trace}."
-    return {"status":"ok","engine":"OFERTA IA V9.5","mode":"opportunities","niche":niche or "todos","items":selected,"opportunities":selected,"returned":len(selected),"candidates_found":len(raw_candidates),"validated":len(products),"diagnostic":diag,"message":message,"cached":False}
+    return {"status":"ok","engine":"OFERTA IA V9.6","mode":"opportunities","niche":niche or "todos","items":selected,"opportunities":selected,"returned":len(selected),"candidates_found":len(raw_candidates),"validated":len(products),"diagnostic":diag,"message":message,"cached":False}
 
 @app.get("/api/v9/search-diagnostic")
 def v9_search_diagnostic(q: str = "air fryer"):
@@ -1973,7 +1977,7 @@ def v9_search_diagnostic(q: str = "air fryer"):
 def v9_diagnostic():
     return {
         "status": "ok",
-        "engine": "OFERTA IA V9.5",
+        "engine": "OFERTA IA V9.6",
         "diagnostic": _V93_LAST_DIAGNOSTIC,
         "log": _v94_log_text(),
     }
