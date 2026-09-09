@@ -7,6 +7,9 @@ import base64
 import hashlib
 import secrets
 import time
+import logging
+import uuid
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 from html import unescape
 from urllib.parse import urljoin, urlparse
@@ -15,6 +18,32 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from supabase import create_client
+
+# V9.3 — log estruturado para rastrear todo o caminho da descoberta.
+# O Render captura stdout/stderr automaticamente. Nenhum token é registrado.
+logger = logging.getLogger("oferta_ia.v9")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s | V9.3 | %(levelname)s | %(message)s"))
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
+_V93_LAST_DIAGNOSTIC = {}
+_V94_LOG_BUFFER = []
+_V94_LOG_MAX_LINES = 500
+
+def _v93_log(stage, message, **fields):
+    global _V94_LOG_BUFFER
+    safe = {k: v for k, v in fields.items() if k not in {"token", "access_token", "refresh_token", "client_secret"}}
+    suffix = " | " + " ".join(f"{k}={v}" for k, v in safe.items()) if safe else ""
+    line = f"{datetime.now().strftime("%H:%M:%S")} | {stage} | {message}{suffix}"
+    _V94_LOG_BUFFER.append(line)
+    if len(_V94_LOG_BUFFER) > _V94_LOG_MAX_LINES:
+        del _V94_LOG_BUFFER[:-_V94_LOG_MAX_LINES]
+    logger.info("[%s] %s%s", stage, message, suffix)
+
+def _v94_log_text():
+    return "\n".join(_V94_LOG_BUFFER)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -101,6 +130,21 @@ main{max-width:1100px;margin:auto;padding:18px 14px 70px}.hero{background:linear
 
 <section id="productSection" class="panel hidden"><div class="panel-head"><h2>📦 Pesquisar produtos</h2><button class="close" id="closeProducts">Fechar</button></div><p class="hint">Use para procurar algo específico. A busca filtra acessórios e resultados que não correspondem ao produto principal.</p><div class="form"><div class="input-row"><input id="productSearch" placeholder="Ex.: iPhone 16, smartwatch, air fryer"><input id="productLimit" type="number" min="1" max="20" value="10"></div><button id="runProductSearch" class="primary blue">🔎 Pesquisar produtos</button></div><div id="productSearchStatus" class="muted" style="margin-top:10px"></div><div id="productResults" class="results"></div></section>
 
+<section id="diagnosticSection" class="panel">
+<div class="panel-head"><h2>🛠️ Diagnóstico / Log</h2></div>
+<p class="hint">Use esta área depois de testar o garimpo. O log mostra onde a busca encontrou ou perdeu candidatos, sem exibir tokens ou segredos.</p>
+<div class="actions">
+<button id="refreshLogBtn" class="action dark">🔄 Atualizar log</button>
+<button id="copyLogBtn" class="action" style="background:#ecfdf3;color:#027a48">📋 Copiar log</button>
+</div>
+<div class="actions">
+<a class="action" href="/api/v9/log.txt" target="_blank" rel="noopener">📄 Abrir log .txt</a>
+<button id="clearLogBtn" class="action" style="background:#f2f4f7;color:#344054">🧹 Limpar tela</button>
+</div>
+<pre id="v94Log" style="margin-top:10px;white-space:pre-wrap;word-break:break-word;background:#0b1220;color:#e5e7eb;border-radius:14px;padding:12px;font-size:11px;line-height:1.55;max-height:420px;overflow:auto">Nenhum log disponível. Execute uma busca de oportunidades primeiro.</pre>
+<div id="v94LogStatus" class="muted" style="margin-top:8px"></div>
+</section>
+
 <section class="panel"><div class="panel-head"><h2>📢 Canais</h2></div><div id="channelOptions" class="channels"><label class="channel"><input type="checkbox" value="whatsapp" checked>💬 WhatsApp</label><label class="channel"><input type="checkbox" value="instagram">📸 Instagram</label><label class="channel"><input type="checkbox" value="telegram">✈️ Telegram</label></div></section>
 <section class="panel"><div class="panel-head"><h2>🔌 Conexões</h2></div><div class="integration-grid"><div class="integration"><h3>🛒 Mercado Livre</h3><div id="meliStatus" class="muted">Verificando...</div><button id="meliConnectBtn" class="small-btn blue">🔐 Conectar</button><button id="meliDiagnosticBtn" class="small-btn ghost">🩺 Diagnóstico</button><div id="meliDiagnostic" class="muted" style="margin-top:8px"></div></div><div class="integration"><h3>🛍️ Amazon</h3><div id="amazonStatus" class="muted">Nenhuma identificação salva.</div><input id="amazonTag" placeholder="Identificação de associado" style="margin-top:8px"><button id="amazonSaveBtn" class="small-btn blue">💾 Salvar</button></div></div></section>
 <section class="panel"><div class="panel-head"><h2>➕ Cadastro manual</h2></div><p class="hint">Use apenas quando quiser cadastrar uma oferta que não veio da descoberta automática.</p><form class="form" id="productForm"><input name="name" placeholder="Nome do produto" required><div class="input-row"><input name="store" placeholder="Loja"><input name="category" placeholder="Categoria"></div><input name="url" placeholder="Link do produto" id="productUrl"><button type="button" id="importBtn" class="small-btn ghost">🔎 Buscar dados pelo link</button><div id="importStatus" class="muted"></div><input name="affiliate_url" placeholder="Link de afiliado (quando disponível)"><div class="input-row"><input name="old_price" type="number" step="0.01" placeholder="Preço antigo"><input name="current_price" type="number" step="0.01" placeholder="Preço atual"></div><input name="image_url" placeholder="URL da imagem"><button type="submit" id="submitProductBtn" class="primary dark">Cadastrar produto</button></form></section>
@@ -118,7 +162,35 @@ function opportunityCard(p,i){const s=Number(p.opportunity_score||0);const label
 async function jsonFetch(url,opts={}){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail||'Erro inesperado.');return d}
 async function loadDashboard(){try{const p=await jsonFetch('/api/products');$('products').textContent=(p||[]).length;const s=await jsonFetch('/api/integrations/status');const ok=!!s.mercadolivre?.connected;$('connectedStatus').textContent=ok?'OK':'—';$('meliStatus').textContent=ok?'🟢 Mercado Livre conectado.':'🟡 Mercado Livre não conectado.';$('amazonStatus').textContent=s.amazon?.tag?'🟢 Identificação salva: '+s.amazon.tag:'Nenhuma identificação salva.';$('amazonTag').value=s.amazon?.tag||''}catch(e){}}
 async function loadOffersCount(){try{const d=await jsonFetch('/api/dashboard');$('offers').textContent=d.offers??0}catch(e){}}
-async function loadOpportunities(){const list=$('opportunityList'),status=$('opportunityStatus'),btn=$('runOpportunities');btn.disabled=true;btn.textContent='⏳ Procurando...';loading(list,'Buscando candidatos e priorizando os melhores...');status.textContent='Primeiro o ranking; depois o aprofundamento dos melhores produtos.';try{const d=await jsonFetch('/api/v9/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})});window.currentOpportunities=d.items||d.opportunities||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.'}catch(e){list.innerHTML='';status.textContent='⚠️ '+e.message}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
+async function refreshV94Log(){
+ const out=$('v94Log'),status=$('v94LogStatus');
+ if(!out) return;
+ try{
+   const d=await jsonFetch('/api/v9/diagnostic',{cache:'no-store'});
+   out.textContent=d.log||'Nenhum log disponível. Execute uma busca de oportunidades primeiro.';
+   status.textContent=d.diagnostic?.trace_id?('Rastreamento: '+d.diagnostic.trace_id):'Log atualizado.';
+   out.scrollTop=out.scrollHeight;
+ }catch(e){status.textContent='⚠️ '+e.message}
+}
+async function copyV94Log(){
+ const out=$('v94Log'),status=$('v94LogStatus');
+ const txt=out?.textContent||'';
+ if(!txt || txt.startsWith('Nenhum log disponível')){
+   await refreshV94Log();
+ }
+ const finalTxt=$('v94Log')?.textContent||'';
+ try{
+   await navigator.clipboard.writeText(finalTxt);
+   status.textContent='✅ Log copiado. Agora é só colar aqui no ChatGPT.';
+ }catch(e){
+   status.textContent='⚠️ Não foi possível copiar automaticamente. Abra o log .txt e copie o conteúdo.';
+ }
+}
+$('refreshLogBtn')?.addEventListener('click',refreshV94Log);
+$('copyLogBtn')?.addEventListener('click',copyV94Log);
+$('clearLogBtn')?.addEventListener('click',()=>{ $('v94Log').textContent='Tela limpa. Execute ou atualize o log.'; $('v94LogStatus').textContent=''; });
+
+async function loadOpportunities(){const list=$('opportunityList'),status=$('opportunityStatus'),btn=$('runOpportunities');btn.disabled=true;btn.textContent='⏳ Procurando...';loading(list,'Buscando candidatos e priorizando os melhores...');status.textContent='Primeiro o ranking; depois o aprofundamento dos melhores produtos.';try{const d=await jsonFetch('/api/v9/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})});window.currentOpportunities=d.items||d.opportunities||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.';await refreshV94Log()}catch(e){list.innerHTML='';status.textContent='⚠️ '+e.message;await refreshV94Log()}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
 async function searchProducts(){const q=$('productSearch').value.trim(),out=$('productResults'),status=$('productSearchStatus');if(!q){status.textContent='Digite um produto ou nicho.';return}loading(out,'Pesquisando e filtrando resultados...');status.textContent='Buscando apenas produtos compatíveis com sua pesquisa.';try{const d=await jsonFetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number($('productLimit').value||10)})});window.currentSearchProducts=d.items||[];out.innerHTML=window.currentSearchProducts.length?window.currentSearchProducts.map((p,i)=>productCard(p,i,'products')).join(''):'<div class="empty">Nenhum produto principal relevante encontrado.</div>';status.textContent=`✅ ${window.currentSearchProducts.length} produto(s) relevante(s).`}catch(e){out.innerHTML='';status.textContent='⚠️ '+e.message}}
 async function addProduct(i){const p=window.currentSearchProducts?.[i];if(!p)return;try{await jsonFetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name,store:p.store||'Mercado Livre',url:p.url,category:p.category,current_price:p.current_price,old_price:p.old_price,image_url:p.image_url,marketplace:p.marketplace||'mercadolivre',item_id:p.item_id})});alert('Produto salvo no OFERTA IA.');loadDashboard()}catch(e){alert(e.message)}}
 async function approveOpportunity(i){const p=window.currentOpportunities?.[i];if(!p)return;const btns=document.querySelectorAll('#opportunityList button');btns.forEach(b=>b.disabled=true);try{const d=await jsonFetch('/api/approve-and-publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:p,channels:channels()})});alert(d.message||'Oferta aprovada.');loadOffersCount()}catch(e){alert(e.message)}finally{btns.forEach(b=>b.disabled=false)}}
@@ -1413,22 +1485,26 @@ def _v9_fetch_json(token, url, params=None, timeout=10):
 
 
 def _v9_get_item(token, item_id):
-    """Obtém uma publicação real e ativa."""
-    data, _ = _v9_fetch_json(
+    """Obtém uma publicação real e ativa, registrando exatamente por que foi rejeitada."""
+    data, status = _v9_fetch_json(
         token, f"https://api.mercadolibre.com/items/{item_id}", timeout=8
     )
     if not isinstance(data, dict):
+        logger.warning("[VALIDATE] item_rejected reason=no_item_data item_id=%s http=%s", item_id, status)
         return None
 
     if data.get("status") != "active":
+        logger.info("[VALIDATE] item_rejected reason=inactive item_id=%s item_status=%s", item_id, data.get("status"))
         return None
 
     permalink = data.get("permalink")
     if not permalink or not str(permalink).startswith("http"):
+        logger.info("[VALIDATE] item_rejected reason=no_permalink item_id=%s", item_id)
         return None
 
     price = _v9_num(data.get("price"))
     if price is None or price <= 0:
+        logger.info("[VALIDATE] item_rejected reason=no_valid_price item_id=%s raw_price=%s", item_id, data.get("price"))
         return None
 
     old = _v9_num(data.get("original_price"))
@@ -1645,191 +1721,144 @@ def _v9_analyze(item, rank_position=None, trend_rank=None, commission_rate=None)
 
 @app.post("/api/v9/opportunities")
 def v9_opportunities(payload: dict):
+    """V9.3: garimpo com diagnóstico por etapa e erros visíveis no log do Render."""
+    global _V93_LAST_DIAGNOSTIC, _V94_LOG_BUFFER
+    _V94_LOG_BUFFER = []
+    trace = uuid.uuid4().hex[:8]
+    started = time.time()
+    diag = {"trace_id": trace, "token_valid": False, "trends_requests": 0, "trend_terms": 0,
+            "queries": 0, "search_requests_ok": 0, "search_requests_error": 0,
+            "raw_candidates": 0, "filtered_candidates": 0, "item_requests": 0,
+            "item_active": 0, "with_price": 0, "with_url": 0, "validated_products": 0,
+            "final": 0, "errors": []}
+
+    def err(stage, message, **fields):
+        if len(diag["errors"]) < 20:
+            diag["errors"].append({"stage": stage, "message": message, **fields})
+        _v93_log(stage, message, trace=trace, **fields)
+
+    _v93_log("START", "Início do garimpo", trace=trace)
     token = _v9_valid_meli_token()
     if not token:
-        raise HTTPException(
-            401,
-            "Mercado Livre sem sessão válida. Conecte novamente o Mercado Livre."
-        )
+        err("AUTH", "Não foi possível obter token válido")
+        diag["elapsed_ms"] = round((time.time()-started)*1000)
+        _V93_LAST_DIAGNOSTIC = diag
+        raise HTTPException(401, "Mercado Livre sem sessão válida. Conecte novamente o Mercado Livre.")
+    diag["token_valid"] = True
+    _v93_log("AUTH", "Token válido", trace=trace)
 
     niche = _canonical_query((payload.get("niche") or "").strip())
-    try:
-        limit = max(
-            5,
-            min(20, int(payload.get("limit") or payload.get("quantity") or 10))
-        )
-    except Exception:
-        limit = 10
-
+    try: limit = max(5, min(20, int(payload.get("limit") or payload.get("quantity") or 10)))
+    except Exception: limit = 10
     category_id = (payload.get("category_id") or "").strip() or None
-    cache_key = f"v9.1:{niche}:{category_id or 'all'}:{limit}"
-    cached = _cache_get(cache_key)
-    if cached:
-        return {**cached, "cached": True}
 
-    # 1) Descoberta de demanda.
-    # Não dependemos de categorias-pai no /highlights, porque o ranking
-    # de mais vendidos é disponibilizado por categorias elegíveis.
-    trends = _v9_trends(token, category_id)
-    queries = _v9_seed_queries(niche, trends, max_queries=8)
+    trends = []
+    try:
+        diag["trends_requests"] += 1
+        trends = _v9_trends(token, category_id) or []
+        diag["trend_terms"] = len(trends)
+        _v93_log("TRENDS", "Tendências carregadas", trace=trace, terms=len(trends))
+    except Exception as exc:
+        err("TRENDS", "Falha ao carregar tendências", error=type(exc).__name__)
 
-    raw_candidates = []
-    seen_items = set()
+    try: queries = _v9_seed_queries(niche, trends, max_queries=8)
+    except Exception as exc:
+        queries = [niche] if niche else ["smartphone", "air fryer", "fone bluetooth", "notebook", "smartwatch"]
+        err("QUERIES", "Falha ao montar consultas; usando fallback", error=type(exc).__name__)
+    queries = list(dict.fromkeys([q for q in queries if q]))[:8]
+    diag["queries"] = len(queries)
+    _v93_log("QUERIES", "Consultas definidas", trace=trace, count=len(queries), queries=" || ".join(queries))
 
+    raw_candidates, seen_items = [], set()
     def collect_query(q):
-        rows = _v9_search_listings(
-            token,
-            q,
-            limit=max(12, min(25, limit * 2)),
-            sort=None,
-            category_id=category_id,
-        )
-        return q, rows
+        try:
+            rows = _v9_search_listings(token, q, limit=max(12, min(25, limit*2)), sort=None, category_id=category_id)
+            return q, rows, None
+        except Exception as exc: return q, [], exc
 
     with ThreadPoolExecutor(max_workers=min(8, len(queries) or 1)) as pool:
-        for q, rows in pool.map(collect_query, queries):
+        futures = [pool.submit(collect_query, q) for q in queries]
+        for future in as_completed(futures):
+            q, rows, exc = future.result()
+            if exc:
+                diag["search_requests_error"] += 1
+                err("SEARCH", "Exceção na busca", query=q, error=type(exc).__name__)
+                continue
+            diag["search_requests_ok"] += 1
+            _v93_log("SEARCH", "Busca concluída", trace=trace, query=q, rows=len(rows))
             for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                iid = row.get("id")
-                title = row.get("title") or ""
-                if not iid or iid in seen_items:
-                    continue
-                if _looks_like_accessory(title):
-                    continue
-
-                # Para nicho, mantemos apenas resultados semanticamente próximos.
-                if niche:
-                    rel = _relevance_score(
-                        niche,
-                        title,
-                        row.get("category_id") or "",
-                    )
-                    if rel < 0.35:
-                        continue
-
+                if not isinstance(row, dict): continue
+                diag["raw_candidates"] += 1
+                iid, title = row.get("id"), row.get("title") or ""
+                if not iid or iid in seen_items or _looks_like_accessory(title): continue
+                if niche and _relevance_score(niche, title, row.get("category_id") or "") < 0.35: continue
                 seen_items.add(iid)
-                raw_candidates.append({
-                    "item_id": iid,
-                    "query": q,
-                    "trend_rank": _v9_trend_rank_for_name(title, trends),
-                    "search_row": row,
-                })
+                raw_candidates.append({"item_id": iid, "query": q,
+                    "trend_rank": _v9_trend_rank_for_name(title, trends), "search_row": row})
 
-    # 2) Se houver categoria informada e a busca trouxe pouco, tentamos
-    # diretamente os mais vendidos daquela categoria.
-    if category_id and len(raw_candidates) < max(10, limit):
-        data, _ = _v9_fetch_json(
-            token,
-            f"https://api.mercadolibre.com/highlights/MLB/category/{category_id}",
-            timeout=8,
-        )
-        for row in (data or {}).get("content", []) if isinstance(data, dict) else []:
-            if not isinstance(row, dict):
-                continue
-            rid = row.get("id")
-            typ = row.get("type")
-            pos = row.get("position")
-            if not rid:
-                continue
-            raw_candidates.append({
-                "item_id": rid,
-                "type": typ,
-                "rank_position": pos,
-                "query": f"category:{category_id}",
-                "trend_rank": None,
-            })
+    diag["filtered_candidates"] = len(raw_candidates)
+    _v93_log("CANDIDATES", "Candidatos após filtros", trace=trace, raw=diag["raw_candidates"], kept=len(raw_candidates))
 
-    # 3) Validação/enriquecimento. Para ITEM, valida direto.
-    # Para PRODUCT/USER_PRODUCT, converte para um item real.
-    enrich = raw_candidates[:max(limit * 4, 40)]
-    products = []
-
+    enrich = raw_candidates[:max(limit*4, 40)]
+    products, errors_counter = [], Counter()
     def enrich_one(candidate):
-        iid = candidate.get("item_id")
-        typ = candidate.get("type") or "ITEM"
-        pos = candidate.get("rank_position")
-        q = candidate.get("query") or ""
-
-        if typ in ("PRODUCT", "USER_PRODUCT"):
-            item = _v9_catalog_to_item(token, iid, pos, q)
-        else:
+        iid, pos, q = candidate.get("item_id"), candidate.get("rank_position"), candidate.get("query") or ""
+        try:
+            diag["item_requests"] += 1
             item = _v9_get_item(token, iid)
-
-        if not item:
+            if not item:
+                errors_counter["item_invalid"] += 1
+                return None
+            diag["item_active"] += 1
+            if item.get("current_price") is not None: diag["with_price"] += 1
+            if item.get("url"): diag["with_url"] += 1
+            item["rank_position"], item["discovery_query"] = pos, q
+            tr = candidate.get("trend_rank")
+            if tr is None: tr = _v9_trend_rank_for_name(item.get("name", ""), trends)
+            return _v9_analyze(item, pos, tr, None)
+        except Exception as exc:
+            errors_counter[type(exc).__name__] += 1
             return None
-
-        item["rank_position"] = pos
-        item["discovery_query"] = q
-
-        tr = candidate.get("trend_rank")
-        if tr is None:
-            tr = _v9_trend_rank_for_name(item.get("name", ""), trends)
-
-        return _v9_analyze(item, pos, tr, None)
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         futures = [pool.submit(enrich_one, c) for c in enrich]
         for future in as_completed(futures):
-            try:
-                item = future.result()
-                if item:
-                    products.append(item)
-            except Exception:
-                continue
+            item = future.result()
+            if item: products.append(item)
 
-    # 4) Deduplicação por publicação real.
+    diag["validated_products"] = len(products)
+    for k,v in errors_counter.items():
+        if k != "item_invalid": diag["errors"].append({"stage":"VALIDATE","message":"Erro em candidato","error":k,"count":v})
+    _v93_log("VALIDATE", "Validação concluída", trace=trace, requested=len(enrich), active=diag["item_active"], price=diag["with_price"], url=diag["with_url"], valid=len(products), invalid=errors_counter.get("item_invalid",0))
+
     unique = {}
     for p in products:
         key = p.get("item_id") or p.get("name")
-        if key and (
-            key not in unique
-            or float(p.get("opportunity_score") or 0)
-            > float(unique[key].get("opportunity_score") or 0)
-        ):
-            unique[key] = p
-
+        if key and (key not in unique or float(p.get("opportunity_score") or 0) > float(unique[key].get("opportunity_score") or 0)): unique[key] = p
     products = list(unique.values())
-    products.sort(
-        key=lambda p: (
-            -float(p.get("opportunity_score") or 0),
-            999 if p.get("trend_rank") is None else int(p.get("trend_rank")),
-            float(p.get("current_price") or 10**12),
-        )
-    )
-
+    products.sort(key=lambda p:(-float(p.get("opportunity_score") or 0), 999 if p.get("trend_rank") is None else int(p.get("trend_rank")), float(p.get("current_price") or 10**12)))
     selected = products[:limit]
+    diag["final"] = len(selected); diag["elapsed_ms"] = round((time.time()-started)*1000)
+    _V93_LAST_DIAGNOSTIC = diag
+    _v93_log("END", "Garimpo encerrado", trace=trace, final=len(selected), elapsed_ms=diag["elapsed_ms"])
+    message = f"{len(selected)} oportunidade(s) encontrada(s). Rastreamento {trace}." if selected else f"Nenhuma oportunidade passou. Rastreamento {trace}."
+    return {"status":"ok","engine":"OFERTA IA V9.4","mode":"opportunities","niche":niche or "todos","items":selected,"opportunities":selected,"returned":len(selected),"candidates_found":len(raw_candidates),"validated":len(products),"diagnostic":diag,"message":message,"cached":False}
 
-    if selected:
-        message = (
-            f"{len(selected)} oportunidade(s) encontrada(s) "
-            f"após validar {len(enrich)} candidatos."
-        )
-    else:
-        message = (
-            "O Mercado Livre respondeu, mas nenhum anúncio ativo com "
-            "preço e link válidos passou na validação."
-        )
-
-    result = {
+@app.get("/api/v9/diagnostic")
+def v9_diagnostic():
+    return {
         "status": "ok",
-        "engine": "OFERTA IA V9.1",
-        "mode": "opportunities",
-        "niche": niche or "todos",
-        "items": selected,
-        "opportunities": selected,
-        "returned": len(selected),
-        "candidates_found": len(raw_candidates),
-        "validated": len(products),
-        "diagnostic": {
-            "trends": len(trends),
-            "queries": len(queries),
-            "raw_candidates": len(raw_candidates),
-            "validated_products": len(products),
-            "token_refreshed_or_valid": bool(token),
-        },
-        "message": message,
-        "cached": False,
+        "engine": "OFERTA IA V9.4",
+        "diagnostic": _V93_LAST_DIAGNOSTIC,
+        "log": _v94_log_text(),
     }
-    return _cache_set(cache_key, result)
+
+@app.get("/api/v9/log.txt")
+def v9_log_txt():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(
+        _v94_log_text() or "Nenhum log disponível. Execute uma busca de oportunidades primeiro.",
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": 'inline; filename="oferta-ia-ultimo-log.txt"'},
+    )
 
