@@ -1,94 +1,100 @@
-"""V10.9 — Mercado Livre rápido e tolerante a endpoints bloqueados.
+"""V10.10 — Mercado Livre rápido e tolerante a endpoints bloqueados.
 
-Este patch não altera OAuth nem os resultados da Shopee. Durante o motor central,
-limita chamadas de enriquecimento do Mercado Livre e aplica timeouts curtos.
-Chamadas que sabemos que podem retornar 403 são encerradas imediatamente, sem
-ficar aguardando dezenas de requisições desnecessárias.
+O motor V9.8 resolve dezenas de candidatos em ThreadPoolExecutor. O patch
+anterior dependia de ContextVar, que não limita chamadas feitas em threads.
+Aqui o limite é aplicado diretamente aos helpers do app, de forma global e
+thread-safe durante cada garimpo.
 """
+import threading
 from contextvars import ContextVar
-from urllib.parse import urlparse
 import requests
 
 _ACTIVE = ContextVar("oferta_meli_fast_active", default=False)
-_COUNT = ContextVar("oferta_meli_fast_count", default=0)
 _INSTALLED = False
-_ORIGINAL_REQUEST = None
+_ORIGINAL_GET_ITEM = None
+_ORIGINAL_CATALOG_TO_ITEM = None
+_LOCK = threading.Lock()
+_ITEM_CALLS = 0
 
-# Limites conservadores: preservam alguns detalhes sem permitir que o ML trave o garimpo.
-MAX_ITEM_DETAIL_CALLS = 10
-ITEM_TIMEOUT = 2.5
-PRODUCT_TIMEOUT = 3.5
-SEARCH_TIMEOUT = 4.0
-
-
-def _blocked_response(url: str):
-    response = requests.Response()
-    response.status_code = 403
-    response.url = url
-    response.reason = "Fast guard: endpoint ignorado"
-    response._content = b'{"message":"Mercado Livre endpoint skipped by performance guard"}'
-    response.headers["content-type"] = "application/json"
-    return response
+MAX_ITEM_DETAIL_CALLS = 8
+ITEM_TIMEOUT = 3.0
 
 
-def _request(self, method, url, **kwargs):
-    if _ACTIVE.get() and isinstance(url, str) and "api.mercadolibre.com" in url:
-        path = urlparse(url).path or ""
+def _reset_budget():
+    global _ITEM_CALLS
+    with _LOCK:
+        _ITEM_CALLS = 0
 
-        # Este endpoint não é necessário para o ranking público e estava gerando 403.
-        if "/user-products/" in path:
-            return _blocked_response(url)
 
-        # Enriquecimento individual é o principal causador de lentidão/403.
-        if "/items/" in path:
-            count = _COUNT.get()
-            if count >= MAX_ITEM_DETAIL_CALLS:
-                return _blocked_response(url)
-            _COUNT.set(count + 1)
-            kwargs["timeout"] = min(float(kwargs.get("timeout", ITEM_TIMEOUT)), ITEM_TIMEOUT)
+def _reserve_item_call():
+    global _ITEM_CALLS
+    with _LOCK:
+        if _ITEM_CALLS >= MAX_ITEM_DETAIL_CALLS:
+            return False
+        _ITEM_CALLS += 1
+        return True
 
-        elif "/products/" in path:
-            kwargs["timeout"] = min(float(kwargs.get("timeout", PRODUCT_TIMEOUT)), PRODUCT_TIMEOUT)
-        else:
-            kwargs["timeout"] = min(float(kwargs.get("timeout", SEARCH_TIMEOUT)), SEARCH_TIMEOUT)
 
-    return _ORIGINAL_REQUEST(self, method, url, **kwargs)
+def _fast_get_item(app_module, token, item_id):
+    if _ACTIVE.get():
+        if not _reserve_item_call():
+            return None
+    return _ORIGINAL_GET_ITEM(token, item_id)
 
 
 async def _asgi(scope, receive, send, original):
     if scope.get("type") != "http" or scope.get("path") != "/api/opportunities-central":
         return await original(scope, receive, send)
 
+    _reset_budget()
     token_active = _ACTIVE.set(True)
-    token_count = _COUNT.set(0)
     try:
         return await original(scope, receive, send)
     finally:
-        _COUNT.reset(token_count)
         _ACTIVE.reset(token_active)
+        _reset_budget()
 
 
 def install(app):
-    global _INSTALLED, _ORIGINAL_REQUEST
+    global _INSTALLED, _ORIGINAL_GET_ITEM, _ORIGINAL_CATALOG_TO_ITEM
     if _INSTALLED:
         return app
 
-    _ORIGINAL_REQUEST = requests.sessions.Session.request
-    requests.sessions.Session.request = _request
+    module = __import__(app.title and "app" or "app")
+    if hasattr(module, "_v9_get_item"):
+        _ORIGINAL_GET_ITEM = module._v9_get_item
+
+        def guarded_get_item(token, item_id):
+            if _ACTIVE.get() and not _reserve_item_call():
+                return None
+            return _ORIGINAL_GET_ITEM(token, item_id)
+
+        module._v9_get_item = guarded_get_item
+
+    # Evita o endpoint user-products, que está retornando 403 e não é necessário
+    # para o ranking rápido. O fluxo de PRODUCT continua usando catálogo.
+    if hasattr(module, "_v9_fetch_json"):
+        original_fetch = module._v9_fetch_json
+
+        def guarded_fetch(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
+            if _ACTIVE.get() and isinstance(url, str) and "/user-products/" in url:
+                return None, 403
+            if _ACTIVE.get() and isinstance(url, str) and "/items/" in url:
+                timeout = min(float(timeout), ITEM_TIMEOUT)
+            return original_fetch(token, url, params, timeout, trace, stage)
+
+        module._v9_fetch_json = guarded_fetch
 
     for route in app.routes:
         if getattr(route, "path", None) == "/api/opportunities-central" and hasattr(route, "app"):
-            original = route.app
+            original_route_app = route.app
 
-            async def guarded(scope, receive, send, _original=original):
+            async def guarded(scope, receive, send, _original=original_route_app):
                 return await _asgi(scope, receive, send, _original)
 
             route.app = guarded
             break
 
     _INSTALLED = True
-    print(
-        f"[V10.9] Mercado Livre rápido ativo | itens={MAX_ITEM_DETAIL_CALLS} "
-        f"timeout_item={ITEM_TIMEOUT}s timeout_produto={PRODUCT_TIMEOUT}s"
-    )
+    print(f"[V10.10] Mercado Livre rápido ativo | max_items={MAX_ITEM_DETAIL_CALLS} timeout={ITEM_TIMEOUT}s")
     return app
