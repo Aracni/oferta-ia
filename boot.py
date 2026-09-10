@@ -1,9 +1,22 @@
-"""Inicializacao explicita do OFERTA IA com patch V10.6."""
+"""Inicialização explícita do OFERTA IA.
+
+Use este arquivo no Start Command do Render para garantir que os patches
+sejam instalados antes de o servidor HTTP começar a atender requisições.
+"""
 import os
 import app as oferta_app
 import v106_patch
 
-v106_patch.install(oferta_app)
+# Motor central: Mercado Livre entra automaticamente nas oportunidades.
+v106_patch.install(oferta_app.app)
+
+# Disponibiliza os helpers internos de persistência ao módulo automático.
+oferta_app.app._get_connection = oferta_app._get_connection
+oferta_app.app._save_connection = oferta_app._save_connection
+
+# Renovação/validação automática do OAuth do Mercado Livre.
+import meli_auto
+meli_auto.install(oferta_app.app)
 
 import uvicorn
 
