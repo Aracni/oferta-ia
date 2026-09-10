@@ -43,7 +43,13 @@ if os.environ.get("PORT"):
 
         import meli_auto as _meli_auto
         _meli_auto.install(_oferta_app.app)
-        print("[SITE] OFERTA IA V10.8 + Mercado Livre automático ativados", flush=True)
+
+        # V10.19: resolve PRODUCT diretamente pelo catálogo/PDP. Não depende
+        # de GET /items/{id}, que pode responder 403 para a aplicação.
+        import meli_catalog_patch as _meli_catalog_patch
+        _meli_catalog_patch.install(_oferta_app)
+
+        print("[SITE] OFERTA IA + Mercado Livre automático + catálogo V10.19 ativados", flush=True)
     except Exception as exc:
         print(
             f"[SITE][AVISO] Patches automáticos não puderam ser ativados: {type(exc).__name__}: {exc}",
