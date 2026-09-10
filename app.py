@@ -4,6 +4,7 @@ A versão integral do aplicativo permanece congelada no commit-base conhecido.
 Este carregador restaura essa versão em memória para que os patches de runtime
 possam evoluir sem duplicar o arquivo monolítico no repositório.
 """
+import re
 import time
 import urllib.request
 
@@ -17,11 +18,11 @@ except Exception as exc:
 
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
-# PATCH V10.13 — catálogo sem cascata + recuperação por busca pública.
+# PATCH V10.14 — catálogo sem cascata + recuperação pública robusta.
 # PRODUCT IDs vindos do ranking podem ter PDP válido, mas sem preço exposto
-# no /products/{id}. Nesse caso, em vez de voltar ao resolver antigo
-# (/products/{id}/items -> /items/{id}), usamos uma única busca pública pelo
-# nome do produto para obter uma publicação real com preço e permalink.
+# no /products/{id}. Nesse caso, recuperamos uma publicação real pela busca
+# pública, priorizando o TÍTULO do produto e sem enviar Bearer token ao endpoint
+# público de busca, evitando os 403 observados na V10.13.
 _OFERTA_ORIGINAL_FETCH_JSON = _v9_fetch_json
 _OFERTA_PUBLIC_CACHE = {}
 _OFERTA_PUBLIC_CACHE_TTL = 300
@@ -52,7 +53,7 @@ def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
-                "User-Agent": "OFERTA-IA/10.13",
+                "User-Agent": "OFERTA-IA/10.14",
             },
             timeout=min(int(timeout or 5), 5),
         )
@@ -83,7 +84,31 @@ def _oferta_number(value):
         return None
 
 
-def _oferta_pick_search_item(payload):
+def _oferta_tokens(text):
+    text = str(text or "").lower()
+    return {
+        token for token in re.findall(r"[a-z0-9à-ÿ]{3,}", text)
+        if token not in {"para", "com", "sem", "por", "uma", "the", "and"}
+    }
+
+
+def _oferta_search_relevant(source_title, result_title):
+    """Evita transformar uma busca genérica em uma oportunidade não relacionada."""
+    source = _oferta_tokens(source_title)
+    result = _oferta_tokens(result_title)
+    if not source or not result:
+        return False
+    overlap = source & result
+    if not overlap:
+        return False
+    # Títulos curtos precisam de correspondência mais forte; títulos longos
+    # aceitam cobertura de pelo menos 25% dos termos do título original.
+    if len(source) <= 2:
+        return len(overlap) >= 1
+    return len(overlap) >= 2 or len(overlap) / len(source) >= 0.25
+
+
+def _oferta_pick_search_item(payload, source_title=""):
     if not isinstance(payload, dict):
         return None
     results = payload.get("results")
@@ -95,14 +120,19 @@ def _oferta_pick_search_item(payload):
         title = item.get("title") or ""
         if _looks_like_accessory(title):
             continue
+        if source_title and not _oferta_search_relevant(source_title, title):
+            continue
         item_id = item.get("id")
         price = _oferta_number(item.get("price"))
         permalink = item.get("permalink")
-        if not item_id or price is None or price <= 0:
+        status = str(item.get("status", "active")).lower()
+        if not item_id or price is None or price <= 0 or status not in {"active", ""}:
             continue
         if not isinstance(permalink, str) or not permalink.startswith("http"):
             permalink = f"https://produto.mercadolivre.com.br/{item_id}"
         pictures = item.get("thumbnail") or item.get("secure_thumbnail")
+        seller = item.get("seller")
+        seller_id = seller.get("id") if isinstance(seller, dict) else None
         return {
             "item_id": str(item_id),
             "name": title,
@@ -112,7 +142,7 @@ def _oferta_pick_search_item(payload):
             "discount_rate": None,
             "category": item.get("category_id"),
             "image_url": pictures,
-            "seller_id": item.get("seller", {}).get("id") if isinstance(item.get("seller"), dict) else None,
+            "seller_id": seller_id,
             "rating": None,
             "marketplace": "mercadolivre",
         }
@@ -121,7 +151,6 @@ def _oferta_pick_search_item(payload):
 
 def _oferta_search_public_listing(token, title, query="", rank_position=None):
     # Só fazemos a recuperação nos candidatos realmente prioritários.
-    # Isso limita custo/rate-limit e mantém o foco nos melhores 25.
     if rank_position is not None:
         try:
             if int(rank_position) > 25:
@@ -129,37 +158,66 @@ def _oferta_search_public_listing(token, title, query="", rank_position=None):
         except Exception:
             pass
 
-    search_text = (query or title or "").strip()
-    if not search_text:
+    # V10.13 usava "query" primeiro. Nos rankings, esse valor frequentemente
+    # é "highlight:MLBxxxx", que não identifica o produto. O título é a fonte
+    # semântica correta; query fica apenas como fallback.
+    candidates = []
+    for raw in (title, query):
+        text = (raw or "").strip()
+        if not text:
+            continue
+        text = text[:120]
+        if text.lower() not in [x.lower() for x in candidates]:
+            candidates.append(text)
+    if not candidates:
         return None
-    search_text = search_text[:120]
-    cache_key = search_text.lower()
-    cached = _OFERTA_SEARCH_CACHE.get(cache_key)
-    if cached and time.time() - cached[0] <= _OFERTA_SEARCH_CACHE_TTL:
-        return cached[1]
 
-    payload, status = _OFERTA_ORIGINAL_FETCH_JSON(
-        token,
-        "https://api.mercadolibre.com/sites/MLB/search",
-        params={"q": search_text, "limit": 5},
-        timeout=5,
-        trace=None,
-        stage="SEARCH",
-    )
-    result = _oferta_pick_search_item(payload)
-    _OFERTA_SEARCH_CACHE[cache_key] = (time.time(), result)
-    if result:
-        _v93_log("SEARCH", "Publicação recuperada pela busca", trace=None,
-                  query=search_text[:80], item_id=result.get("item_id"), price=result.get("current_price"))
-    else:
+    for search_text in candidates[:1]:
+        cache_key = search_text.lower()
+        cached = _OFERTA_SEARCH_CACHE.get(cache_key)
+        if cached and time.time() - cached[0] <= _OFERTA_SEARCH_CACHE_TTL:
+            return cached[1]
+
+        # /sites/MLB/search é endpoint público. Não enviar o token evita o
+        # 403 "forbidden" que apareceu repetidamente na V10.13.
+        try:
+            _v93_log("SEARCH", "Busca pública iniciada", trace=None, query=search_text[:80])
+            response = requests.get(
+                "https://api.mercadolibre.com/sites/MLB/search",
+                params={"q": search_text, "limit": 5},
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "OFERTA-IA/10.14",
+                },
+                timeout=5,
+            )
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {}
+            status = response.status_code
+        except Exception as exc:
+            _OFERTA_SEARCH_CACHE[cache_key] = (time.time(), None)
+            _v93_log("SEARCH", "Falha na busca pública", trace=None,
+                      query=search_text[:80], error=str(exc)[:200])
+            continue
+
+        result = _oferta_pick_search_item(payload, source_title=title)
+        _OFERTA_SEARCH_CACHE[cache_key] = (time.time(), result)
+        if result:
+            _v93_log("SEARCH", "Publicação recuperada pela busca", trace=None,
+                      query=search_text[:80], item_id=result.get("item_id"), price=result.get("current_price"))
+            return result
+
         _v93_log("SEARCH", "Busca pública sem publicação utilizável", trace=None,
                   query=search_text[:80], http=status)
-    return result
+
+    return None
 
 
-# PATCH V10.13 — resolver PRODUCT estritamente pelo PDP; se o PDP não
-# fornecer preço, tenta uma única busca pública por título/query. Nunca chama
-# o resolver antigo e, portanto, nunca dispara /products/{id}/items.
+# PATCH V10.14 — resolver PRODUCT estritamente pelo PDP; se o PDP não
+# fornecer preço, tenta uma única busca pública pelo título. Nunca chama o
+# resolver antigo e, portanto, nunca dispara /products/{id}/items.
 def _oferta_catalog_to_item_strict(token, product_id, rank_position=None, query=""):
     detail, status = _v9_fetch_json(
         token,
