@@ -1,10 +1,4 @@
-"""V10.19 — resolução de PRODUCT sem depender de GET /items/{id}.
-
-O Mercado Livre permite consultar /products/{product_id}/items, mas a
-aplicação pode receber 403 ao consultar /items/{item_id}. Para o garimpo,
-usamos diretamente os dados autorizados do catálogo e da lista PDP.
-"""
-import time
+"""V10.20 — resolução de PRODUCT sem depender de GET /items/{id}."""
 
 
 def install(app_module):
@@ -29,12 +23,8 @@ def install(app_module):
                 return None
 
             winner = detail.get("buy_box_winner")
-            rows = []
-            if isinstance(winner, dict):
-                rows.append(winner)
+            rows = [winner] if isinstance(winner, dict) else []
 
-            # A lista PDP traz item_id + preço e evita a chamada /items/{id},
-            # que para esta aplicação pode responder 403.
             if not rows:
                 data, items_status = app_module._v9_fetch_json(
                     token,
@@ -65,10 +55,6 @@ def install(app_module):
                 if best is None or price < (_num(best.get("price")) or 10**18):
                     best = row
 
-            # Se não houver uma publicação disponível, o próprio produto de
-            # catálogo ainda pode fornecer nome, permalink e faixa de preço.
-            # Nesse caso retornamos um registro de confiança média, sem
-            # inventar um item_id.
             if best is None:
                 price_range = detail.get("buy_box_winner_price_range") or {}
                 minimum = price_range.get("min") if isinstance(price_range, dict) else None
@@ -84,24 +70,12 @@ def install(app_module):
                 if pictures and isinstance(pictures[0], dict):
                     image = pictures[0].get("secure_url") or pictures[0].get("url")
                 p = {
-                    "name": title,
-                    "store": "Mercado Livre",
-                    "marketplace": "mercadolivre",
-                    "product_id": product_id,
-                    "catalog_product_id": product_id,
-                    "item_id": None,
-                    "seller_id": None,
-                    "url": detail.get("permalink") or f"https://www.mercadolivre.com.br/p/{product_id}",
-                    "image_url": image,
-                    "current_price": price,
-                    "old_price": None,
-                    "discount_rate": None,
-                    "category": detail.get("domain_id"),
-                    "rating": None,
-                    "sales": detail.get("sold_quantity"),
-                    "rank_position": rank_position,
-                    "discovery_query": query,
-                    "data_confidence": "média",
+                    "name": title, "store": "Mercado Livre", "marketplace": "mercadolivre",
+                    "product_id": product_id, "catalog_product_id": product_id, "item_id": None,
+                    "seller_id": None, "url": detail.get("permalink") or f"https://www.mercadolivre.com.br/p/{product_id}",
+                    "image_url": image, "current_price": price, "old_price": None, "discount_rate": None,
+                    "category": detail.get("domain_id"), "rating": None, "sales": detail.get("sold_quantity"),
+                    "rank_position": rank_position, "discovery_query": query, "data_confidence": "média",
                 }
                 p["opportunity_score"] = app_module._opportunity_score(p)
                 p["opportunity_label"] = app_module._opportunity_label(p["opportunity_score"])
@@ -127,25 +101,14 @@ def install(app_module):
             discount = round((old - current) / old * 100, 2) if old and current and old > current else None
             seller = best.get("seller") if isinstance(best.get("seller"), dict) else {}
             p = {
-                "name": title,
-                "store": str(seller.get("nickname") or "Mercado Livre"),
-                "marketplace": "mercadolivre",
-                "product_id": product_id,
-                "catalog_product_id": product_id,
-                "item_id": str(iid) if iid else None,
-                "seller_id": best.get("seller_id") or seller.get("id"),
-                "url": permalink,
-                "image_url": image,
-                "current_price": current,
-                "old_price": old,
-                "discount_rate": discount,
-                "category": best.get("category_id") or detail.get("domain_id"),
-                "rating": best.get("rating"),
-                "sales": best.get("sold_quantity") or detail.get("sold_quantity"),
-                "condition": best.get("condition") or best.get("item_condition"),
-                "rank_position": rank_position,
-                "discovery_query": query,
-                "data_confidence": "alta",
+                "name": title, "store": str(seller.get("nickname") or "Mercado Livre"),
+                "marketplace": "mercadolivre", "product_id": product_id, "catalog_product_id": product_id,
+                "item_id": str(iid) if iid else None, "seller_id": best.get("seller_id") or seller.get("id"),
+                "url": permalink, "image_url": image, "current_price": current, "old_price": old,
+                "discount_rate": discount, "category": best.get("category_id") or detail.get("domain_id"),
+                "rating": best.get("rating"), "sales": best.get("sold_quantity") or detail.get("sold_quantity"),
+                "condition": best.get("condition") or best.get("item_condition"), "rank_position": rank_position,
+                "discovery_query": query, "data_confidence": "alta",
             }
             p["opportunity_score"] = app_module._opportunity_score(p)
             p["opportunity_label"] = app_module._opportunity_label(p["opportunity_score"])
@@ -155,6 +118,10 @@ def install(app_module):
             app_module._v93_log("CATALOG", "Falha ao resolver produto", product_id=product_id, error=str(exc)[:220])
             return None
 
+    # V10.19 criava um helper novo, mas o núcleo congelado continua chamando
+    # diretamente _product_from_catalog. V10.20 instala o resolver nos DOIS
+    # nomes para garantir que a função realmente usada pelo garimpo seja substituída.
     app_module._v9_catalog_to_item = _catalog_to_item
-    app_module._meli_catalog_patch_version = "V10.19"
-    print("[CATALOG_PATCH] V10.19 ativo: PRODUCT usa /products/{id}/items sem depender de /items/{id}", flush=True)
+    app_module._product_from_catalog = _catalog_to_item
+    app_module._meli_catalog_patch_version = "V10.20"
+    print("[CATALOG_PATCH] V10.20 ativo: _product_from_catalog substituído; PRODUCT não usa /items/{id}", flush=True)
