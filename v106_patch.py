@@ -10,11 +10,9 @@ CATEGORY_HINTS = {
     "moda": "MLB1430",
 }
 
-
 def _norm(text):
     text = str(text or "").strip().lower()
     return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
-
 
 def install(app):
     original_ml = getattr(app, "mercadolivre_opportunities", None)
@@ -44,11 +42,12 @@ def install(app):
     if original_central is not None and not getattr(original_central, "_v106_auto_meli", False):
         def central_wrapper(payload):
             payload = dict(payload or {})
-            if "include_meli" not in payload:
-                payload["include_meli"] = True
+            # O modo central V10.6 consulta Mercado Livre automaticamente.
+            payload["include_meli"] = True
             result = original_central(payload)
             if isinstance(result, dict):
                 result["engine"] = "OFERTA IA V10.6 ML OTIMIZADO"
+                result["meli_mode"] = "automatic"
             return result
         central_wrapper._v106_auto_meli = True
         for route in getattr(app.app, "routes", []):
@@ -57,6 +56,9 @@ def install(app):
                 try:
                     from fastapi.dependencies.utils import get_dependant
                     route.dependant = get_dependant(path=route.path, call=central_wrapper)
+                    # APIRoute já possui um handler ASGI compilado em route.app.
+                    # Recrie-o depois de trocar o endpoint para que o wrapper seja realmente executado.
+                    route.app = route.get_route_handler()
                 except Exception:
                     pass
                 break
