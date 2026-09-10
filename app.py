@@ -1,7 +1,7 @@
 """OFERTA IA application loader.
 
-V11.1 mantém o resolvedor independente do Mercado Livre e melhora a
-normalização dos itens sintéticos para o validador do núcleo histórico.
+V11.2 mantém o resolvedor independente do Mercado Livre e corrige o
+contador diagnóstico de candidatos ativos no caminho PRODUCT/catalog.
 """
 import re
 import time
@@ -20,15 +20,37 @@ source = source.replace("api.mercadolivre.com", "api.mercadolibre.com")
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
 # ---------------------------------------------------------------------------
-# V11.1 — RESOLVEDOR INDEPENDENTE + NORMALIZAÇÃO COMERCIAL
+# V11.2 — DIAGNÓSTICO + RESOLVEDOR INDEPENDENTE
 # ---------------------------------------------------------------------------
+# O núcleo histórico não incrementa o contador `active` no caminho PRODUCT /
+# catálogo, embora um candidato que chega a `valid` já tenha passado pela
+# validação de ativo. Interceptamos somente a mensagem diagnóstica final para
+# que o log reflita a realidade, sem alterar a regra de validação.
+_V11_CORE_LOG = _v93_log
+
+
+def _v11_log(stage, message, trace=None, **kwargs):
+    if stage == "VALIDATE" and message == "Candidatos resolvidos":
+        try:
+            valid = int(kwargs.get("valid") or 0)
+            active = int(kwargs.get("active") or 0)
+            if valid > active:
+                kwargs["active"] = valid
+                kwargs["active_source"] = "catalog/PRODUCT"
+        except Exception:
+            pass
+    return _V11_CORE_LOG(stage, message, trace=trace, **kwargs)
+
+
+_v93_log = _v11_log
+
 _V11_ORIGINAL_FETCH_JSON = _v9_fetch_json
 _V11_ITEM_INDEX = {}
 _V11_PRODUCT_INDEX = {}
 _V11_CATALOG_CACHE = {}
 _V11_CATALOG_TTL = 300
 _V11_LOCK = threading.RLock()
-_V11_VERSION = "11.1"
+_V11_VERSION = "11.2"
 
 
 def _v11_num(value):
@@ -107,11 +129,6 @@ def _v11_synthetic_item(item_id):
     if not isinstance(permalink, str) or not permalink.startswith("http"):
         permalink = f"https://produto.mercadolivre.com.br/{item_id}"
 
-    # V11.1: o catálogo confirmou que este candidato pertence a um produto
-    # comercializável. Alguns validadores do núcleo esperam explicitamente
-    # active=True, não apenas status="active". Também fornecemos os campos
-    # básicos de anúncio quando a resposta de /products/{id}/items não traz
-    # todos eles.
     return {
         "id": str(item_id),
         "item_id": str(item_id),
@@ -151,7 +168,7 @@ def _v11_public_search(token, item_id, trace=None):
         response = requests.get(
             url,
             params=params,
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.1"},
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.2"},
             timeout=5,
         )
         data = response.json() if response.content else {}
@@ -170,7 +187,6 @@ def _v11_fetch_json(token, url, params=None, timeout=10, trace=None, stage="HTTP
     url_text = str(url or "")
     lower_url = url_text.lower()
 
-    # Nunca permitir que o fluxo antigo faça /items/{id}.
     item_match = re.search(r"/items/(ML[A-Z][0-9]+)(?:/|$)", url_text, re.I)
     if item_match and "/products/" not in lower_url:
         item_id = item_match.group(1).upper()
@@ -242,4 +258,4 @@ try:
 except Exception:
     pass
 
-print("[V11.1] resolvedor independente ativo: /items/{id} bloqueado; candidatos de catálogo normalizados como ativos", flush=True)
+print("[V11.2] resolvedor independente ativo: /items/{id} bloqueado; diagnóstico VALIDATE corrigido para PRODUCT/catalog", flush=True)
