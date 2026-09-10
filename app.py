@@ -1178,6 +1178,61 @@ def _shopee_rating_score(rating):
     return 100.0
 
 
+SHOPEE_NICHE_RULES = {
+    "eletronicos": {
+        "positive": {"celular","smartphone","iphone","tablet","notebook","computador","pc","monitor","televisao","tv","smartwatch","relogio inteligente","fone","headphone","headset","caixa de som","speaker","camera","webcam","projetor","impressora","roteador","modem","console","videogame","playstation","xbox","nintendo","drone","ring light","microfone","eletronico"},
+        "negative": {"vela","adesivo","personalizado","logo","decoracao","festa","casamento","suporte","capa","capinha","pelicula","bolsa","brinde","faixa","gorro"},
+    },
+    "beleza": {
+        "positive": {"cabelo","cachos","crespo","shampoo","condicionador","mascara","creme","skin","skincare","pele","rosto","maquiagem","batom","base","corretivo","perfume","cosmetico","unha","esmalte","escova","secador","chapinha","modelador","babyliss","sobrancelha","depilacao","hidratante","protetor solar"},
+        "negative": {"limpeza","roupa","cozinha","ferramenta","automotivo","adesivo detox","percarbonato","lençol","vela","organizacao"},
+    },
+    "casa": {
+        "positive": {"cama","mesa","banho","cozinha","limpeza","organizador","organizacao","decoracao","lençol","toalha","travesseiro","tapete","cortina","espelho","panela","utensilio","pote","lixeira","vassoura","mop","aspirador","varal","colcha","edredom","almofada"},
+        "negative": {"cabelo","maquiagem","batom","perfume","iphone","smartphone","videogame","academia","suplemento"},
+    },
+    "fitness": {
+        "positive": {"fitness","academia","treino","exercicio","yoga","pilates","halter","anilha","elastico","faixa elastica","tapete yoga","whey","creatina","suplemento","corrida","caminhada","musculacao","garrafa esportiva"},
+        "negative": {"maquiagem","cabelo","lençol","vela","adesivo","decoracao"},
+    },
+    "moda": {
+        "positive": {"camiseta","camisa","calca","shorts","bermuda","vestido","saia","blusa","jaqueta","casaco","tenis","sapato","sandalia","chinelo","bolsa","mochila","roupa","moda","lingerie","calcinha","sutia","meia"},
+        "negative": {"casa","cozinha","limpeza","ferramenta","eletronico","celular","notebook"},
+    },
+}
+
+def _shopee_niche_key(niche):
+    n = _norm_text(niche)
+    aliases = {
+        "eletronica": "eletronicos", "eletronico": "eletronicos",
+        "beleza e cuidados": "beleza", "casa e decoracao": "casa",
+        "esportes": "fitness", "fitness e esportes": "fitness",
+        "roupas": "moda", "vestuario": "moda",
+    }
+    return aliases.get(n, n)
+
+def _shopee_niche_relevance(niche, title):
+    """Filtro comercial de nicho: evita que a busca textual da Shopee traga falsos positivos."""
+    n = _shopee_niche_key(niche)
+    text = _norm_text(title)
+    if not n:
+        return 1.0
+    rules = SHOPEE_NICHE_RULES.get(n)
+    if rules:
+        negative = rules["negative"]
+        if any(_norm_text(term) in text for term in negative):
+            return 0.0
+        positive = rules["positive"]
+        if any(_norm_text(term) in text for term in positive):
+            return 1.0
+        return 0.0
+    tokens = _tokens(n)
+    if not tokens:
+        return 0.0
+    hits = sum(1 for t in tokens if t in text)
+    return hits / len(tokens)
+
+
 def _shopee_price_score(price):
     p = _shopee_num(price)
     if p is None or p <= 0: return 0.0
@@ -1311,14 +1366,24 @@ def _shopee_analyze(node, rank_position=None, query=""):
 
 
 def _shopee_search_products(keyword=None, limit=20):
-    variables = {"keyword": keyword or None, "sortType": 2, "page": 1, "limit": max(1, min(50, int(limit)))}
+    # Para nichos, buscamos uma amostra maior e filtramos antes do ranking final.
+    fetch_limit = 50 if keyword else max(20, int(limit))
+    variables = {"keyword": keyword or None, "sortType": 2, "page": 1, "limit": max(1, min(50, fetch_limit))}
     data = _shopee_request(SHOPEE_PRODUCT_QUERY, variables)
     nodes = (((data or {}).get("data") or {}).get("productOfferV2") or {}).get("nodes") or []
     products = []
+    rejected = 0
     for idx, node in enumerate(nodes, 1):
         p = _shopee_analyze(node, idx, keyword or "")
-        if p:
-            products.append(p)
+        if not p:
+            continue
+        if keyword:
+            relevance = _shopee_niche_relevance(keyword, p.get("name", ""))
+            if relevance < 0.5:
+                rejected += 1
+                continue
+            p["niche_relevance"] = round(relevance, 2)
+        products.append(p)
     products.sort(key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
     return products
 
