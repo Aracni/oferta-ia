@@ -6,8 +6,6 @@ Quando PORT está presente, o app é carregado e os patches de inicialização s
 import os
 
 # Compatibilidade Mercado Livre: a API oficial usa api.mercadolibre.com.
-# Alguns caminhos legados podem montar api.mercadolivre.com; normalize antes
-# de qualquer chamada HTTP para evitar falhas de resolução DNS.
 try:
     import requests
     from urllib.parse import urlsplit, urlunsplit
@@ -33,25 +31,37 @@ except Exception:
 if os.environ.get("PORT"):
     try:
         import app as _oferta_app
-        import v106_patch as _v106
-        _v106.install(_oferta_app)
 
-        # Disponibiliza ao patch automático somente os helpers internos de
-        # persistência já existentes no app.py. Nenhum segredo é exposto.
-        _oferta_app.app._get_connection = _oferta_app._get_connection
-        _oferta_app.app._save_connection = _oferta_app._save_connection
-
-        import meli_auto as _meli_auto
-        _meli_auto.install(_oferta_app.app)
-
-        # V10.19: resolve PRODUCT diretamente pelo catálogo/PDP. Não depende
-        # de GET /items/{id}, que pode responder 403 para a aplicação.
+        # V10.20/V10.21: este é o patch crítico. Instale-o primeiro para que
+        # qualquer falha em outro patch não impeça a substituição de
+        # _product_from_catalog usada diretamente pelo núcleo congelado.
         import meli_catalog_patch as _meli_catalog_patch
         _meli_catalog_patch.install(_oferta_app)
+        print("[SITE] CATALOG V10.20 instalado antes dos demais patches", flush=True)
 
-        print("[SITE] OFERTA IA + Mercado Livre automático + catálogo V10.19 ativados", flush=True)
+        # Os patches auxiliares são isolados: uma falha neles não pode derrubar
+        # o resolver de catálogo.
+        try:
+            import v106_patch as _v106
+            _v106.install(_oferta_app)
+        except Exception as exc:
+            print(f"[SITE][AVISO] v106_patch não ativado: {type(exc).__name__}: {exc}", flush=True)
+
+        try:
+            _oferta_app.app._get_connection = _oferta_app._get_connection
+            _oferta_app.app._save_connection = _oferta_app._save_connection
+        except Exception as exc:
+            print(f"[SITE][AVISO] helpers de persistência não mapeados: {type(exc).__name__}: {exc}", flush=True)
+
+        try:
+            import meli_auto as _meli_auto
+            _meli_auto.install(_oferta_app.app)
+        except Exception as exc:
+            print(f"[SITE][AVISO] meli_auto não ativado: {type(exc).__name__}: {exc}", flush=True)
+
+        print("[SITE] OFERTA IA + catálogo V10.20 ativados", flush=True)
     except Exception as exc:
         print(
-            f"[SITE][AVISO] Patches automáticos não puderam ser ativados: {type(exc).__name__}: {exc}",
+            f"[SITE][ERRO CRÍTICO] App/patch de catálogo não puderam ser ativados: {type(exc).__name__}: {exc}",
             flush=True,
         )
