@@ -1,8 +1,7 @@
 """Inicialização automática do OFERTA IA.
 
 O Render pode iniciar diretamente com `uvicorn app:app`, sem executar boot.py.
-Quando PORT está presente, o app é carregado e o patch V10.8 é instalado antes
-que o uvicorn reutilize o módulo já carregado.
+Quando PORT está presente, o app é carregado e os patches de inicialização são instalados antes que o uvicorn reutilize o módulo já carregado.
 """
 import os
 
@@ -11,6 +10,11 @@ if os.environ.get("PORT"):
         import app as _oferta_app
         import v106_patch as _v106
         _v106.install(_oferta_app)
-        print("[SITE] OFERTA IA V10.8 ativado antes do uvicorn", flush=True)
+        import meli_auto as _meli_auto
+        _meli_auto.install(_oferta_app)
+        print("[SITE] OFERTA IA V10.8 + Mercado Livre automático ativados", flush=True)
     except Exception as exc:
-        print(f"[SITE][AVISO] V10.8 não pôde ser ativado: {type(exc).__name__}: {exc}", flush=True)
+        print(
+            f"[SITE][AVISO] Patches automáticos não puderam ser ativados: {type(exc).__name__}: {exc}",
+            flush=True,
+        )
