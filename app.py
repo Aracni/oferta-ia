@@ -1,7 +1,7 @@
 """OFERTA IA application loader.
 
-V11.2 mantém o resolvedor independente do Mercado Livre e corrige o
-contador diagnóstico de candidatos ativos no caminho PRODUCT/catalog.
+V11.3 mantém o resolvedor independente do Mercado Livre e reforça a
+resolução quando buy_box_winner existe mas não traz preço utilizável.
 """
 import re
 import time
@@ -20,13 +20,16 @@ source = source.replace("api.mercadolivre.com", "api.mercadolibre.com")
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
 # ---------------------------------------------------------------------------
-# V11.2 — DIAGNÓSTICO + RESOLVEDOR INDEPENDENTE
+# V11.3 — RESOLVEDOR INDEPENDENTE + RECUPERAÇÃO ROBUSTA DE OFERTAS
 # ---------------------------------------------------------------------------
-# O núcleo histórico não incrementa o contador `active` no caminho PRODUCT /
-# catálogo, embora um candidato que chega a `valid` já tenha passado pela
-# validação de ativo. Interceptamos somente a mensagem diagnóstica final para
-# que o log reflita a realidade, sem alterar a regra de validação.
 _V11_CORE_LOG = _v93_log
+_V11_ORIGINAL_FETCH_JSON = _v9_fetch_json
+_V11_ITEM_INDEX = {}
+_V11_PRODUCT_INDEX = {}
+_V11_CATALOG_CACHE = {}
+_V11_CATALOG_TTL = 300
+_V11_LOCK = threading.RLock()
+_V11_VERSION = "11.3"
 
 
 def _v11_log(stage, message, trace=None, **kwargs):
@@ -41,16 +44,7 @@ def _v11_log(stage, message, trace=None, **kwargs):
             pass
     return _V11_CORE_LOG(stage, message, trace=trace, **kwargs)
 
-
 _v93_log = _v11_log
-
-_V11_ORIGINAL_FETCH_JSON = _v9_fetch_json
-_V11_ITEM_INDEX = {}
-_V11_PRODUCT_INDEX = {}
-_V11_CATALOG_CACHE = {}
-_V11_CATALOG_TTL = 300
-_V11_LOCK = threading.RLock()
-_V11_VERSION = "11.2"
 
 
 def _v11_num(value):
@@ -94,6 +88,8 @@ def _v11_remember_items(product_id, payload):
     if not isinstance(rows, list):
         rows = payload.get("items")
     if not isinstance(rows, list):
+        rows = payload.get("publications")
+    if not isinstance(rows, list):
         return
     product = _V11_PRODUCT_INDEX.get(str(product_id), {})
     for row in rows:
@@ -113,6 +109,83 @@ def _v11_remember_items(product_id, payload):
             normalized["price"] = _v11_num(normalized.get("current_price"))
         with _V11_LOCK:
             _V11_ITEM_INDEX[item_id] = normalized
+
+
+def _v11_best_catalog_row(product_id, payload):
+    if not isinstance(payload, dict):
+        return None
+    rows = payload.get("results")
+    if not isinstance(rows, list):
+        rows = payload.get("items")
+    if not isinstance(rows, list):
+        rows = payload.get("publications")
+    if not isinstance(rows, list):
+        return None
+    product = _V11_PRODUCT_INDEX.get(str(product_id), {})
+    best = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        iid = row.get("item_id") or row.get("id")
+        price = _v11_num(row.get("price") or row.get("current_price"))
+        title = row.get("title") or product.get("name") or product.get("family_name") or ""
+        if not iid or price is None or price <= 0:
+            continue
+        try:
+            accessory = _looks_like_accessory(title)
+        except Exception:
+            accessory = False
+        if accessory:
+            continue
+        if best is None or price < _v11_num(best.get("price") or best.get("current_price")):
+            best = dict(row)
+    return best
+
+
+def _v11_enrich_product_payload(pid, data, token, trace=None):
+    """Corrige o caso em que buy_box_winner existe, mas o núcleo não consegue
+    usá-lo por falta de preço. Reaproveita /products/{id}/items sem chamar
+    /items/{item_id}."""
+    if not isinstance(data, dict):
+        return data
+
+    winner = data.get("buy_box_winner")
+    winner_price = _v11_num(winner.get("price")) if isinstance(winner, dict) else None
+    winner_id = winner.get("item_id") if isinstance(winner, dict) else None
+
+    price_range = data.get("buy_box_winner_price_range")
+    if isinstance(winner, dict) and winner_id and winner_price is None and isinstance(price_range, dict):
+        minimum = price_range.get("min")
+        minimum_price = minimum.get("price") if isinstance(minimum, dict) else minimum
+        minimum_price = _v11_num(minimum_price)
+        if minimum_price is not None and minimum_price > 0:
+            enriched = dict(data)
+            enriched_winner = dict(winner)
+            enriched_winner["price"] = minimum_price
+            enriched["buy_box_winner"] = enriched_winner
+            return enriched
+
+    # Se o winner continua inutilizável, consulta o catálogo de itens uma vez
+    # e injeta o melhor anúncio na resposta que o núcleo histórico vai consumir.
+    if winner_id and winner_price is not None:
+        return data
+
+    try:
+        items_url = f"https://api.mercadolibre.com/products/{pid}/items"
+        items_data, items_status = _V11_ORIGINAL_FETCH_JSON(token, items_url, {"limit": 20}, 12, trace, "CATALOG")
+        if items_status and 200 <= int(items_status) < 300:
+            _v11_remember_items(pid, items_data)
+            best = _v11_best_catalog_row(pid, items_data)
+            if best:
+                enriched = dict(data)
+                enriched["buy_box_winner"] = best
+                return enriched
+    except Exception as exc:
+        try:
+            _v93_log("CATALOG_V11", "Falha ao enriquecer produto sem winner utilizável", trace=trace, product_id=pid, error=str(exc)[:180])
+        except Exception:
+            pass
+    return data
 
 
 def _v11_synthetic_item(item_id):
@@ -135,7 +208,7 @@ def _v11_synthetic_item(item_id):
         "site_id": site_id,
         "title": title,
         "name": title,
-        "seller_id": row.get("seller_id"),
+        "seller_id": row.get("seller_id") or (row.get("seller") or {}).get("id"),
         "category_id": row.get("category_id"),
         "price": price,
         "base_price": price,
@@ -151,7 +224,7 @@ def _v11_synthetic_item(item_id):
         "product_id": row.get("product_id"),
         "status": row.get("status") or "active",
         "active": True,
-        "condition": row.get("condition") or "new",
+        "condition": row.get("condition") or row.get("item_condition") or "new",
         "buying_mode": row.get("buying_mode") or "buy_it_now",
         "listing_type_id": row.get("listing_type_id") or "gold_special",
         "listing_type": row.get("listing_type") or row.get("listing_type_id") or "gold_special",
@@ -165,12 +238,7 @@ def _v11_public_search(token, item_id, trace=None):
         site = _v11_site_from_id(item_id)
         url = f"https://api.mercadolibre.com/sites/{site}/search"
         params = {"q": str(item_id), "limit": 10}
-        response = requests.get(
-            url,
-            params=params,
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.2"},
-            timeout=5,
-        )
+        response = requests.get(url, params=params, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.3"}, timeout=5)
         data = response.json() if response.content else {}
         for candidate in (data or {}).get("results", []) if isinstance(data, dict) else []:
             if str(candidate.get("id")) == str(item_id):
@@ -187,6 +255,7 @@ def _v11_fetch_json(token, url, params=None, timeout=10, trace=None, stage="HTTP
     url_text = str(url or "")
     lower_url = url_text.lower()
 
+    # Nunca permitir que o fluxo antigo faça /items/{id}.
     item_match = re.search(r"/items/(ML[A-Z][0-9]+)(?:/|$)", url_text, re.I)
     if item_match and "/products/" not in lower_url:
         item_id = item_match.group(1).upper()
@@ -232,10 +301,12 @@ def _v11_fetch_json(token, url, params=None, timeout=10, trace=None, stage="HTTP
     data, status = _V11_ORIGINAL_FETCH_JSON(token, url, safe_params, timeout, trace, stage)
 
     if data is not None and isinstance(status, int) and 200 <= status < 300:
-        with _V11_LOCK:
-            _V11_CATALOG_CACHE[key] = (time.time(), data, status)
         m = re.search(r"/products/(ML[A-Z][0-9]+)(?:/|$)", url_text, re.I)
         pid = m.group(1).upper() if m else None
+        if pid and not url_text.rstrip("/").lower().endswith("/items"):
+            data = _v11_enrich_product_payload(pid, data, token, trace=trace)
+        with _V11_LOCK:
+            _V11_CATALOG_CACHE[key] = (time.time(), data, status)
         if pid:
             if url_text.rstrip("/").lower().endswith("/items"):
                 _v11_remember_items(pid, data)
@@ -248,14 +319,11 @@ _v9_fetch_json = _v11_fetch_json
 
 try:
     if "_meli_get" in globals():
-        _V11_ORIGINAL_MELI_GET = _meli_get
-
         def _v11_meli_get(token, url, params=None, timeout=10):
             data, status = _v11_fetch_json(token, url, params, timeout)
             return data, status
-
         _meli_get = _v11_meli_get
 except Exception:
     pass
 
-print("[V11.2] resolvedor independente ativo: /items/{id} bloqueado; diagnóstico VALIDATE corrigido para PRODUCT/catalog", flush=True)
+print("[V11.3] resolvedor independente ativo: /items/{id} bloqueado; winner sem preço é enriquecido pelo catálogo", flush=True)
