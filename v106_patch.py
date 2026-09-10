@@ -1,9 +1,9 @@
 """OFERTA IA V10.6 — otimização segura do Mercado Livre.
 
-Este módulo preserva o app.py existente e aplica a melhoria V10.6 por
-monkey-patch: nichos conhecidos passam a priorizar a categoria oficial do
-Mercado Livre antes dos fallbacks. A lógica original de validação, score,
-tokens e interface permanece intacta.
+Preserva o app.py existente e aplica melhorias por monkey-patch:
+- prioriza categoria oficial do Mercado Livre quando o nicho é conhecido;
+- ativa o Mercado Livre no motor central, evitando o modo rápido por padrão;
+- mantém score, autenticação, Shopee e interface existentes.
 """
 import unicodedata
 
@@ -26,9 +26,10 @@ def _normalize(value):
 
 
 def install(app_module):
-    original = app_module.mercadolivre_opportunities
+    original_ml = app_module.mercadolivre_opportunities
+    original_central = app_module.opportunities_central
 
-    def optimized(payload: dict):
+    def optimized_ml(payload: dict):
         payload = dict(payload or {})
         niche = _normalize(payload.get("niche"))
         preferred = CATEGORY_HINTS.get(niche)
@@ -36,7 +37,7 @@ def install(app_module):
         if preferred and not payload.get("category_id"):
             payload["category_id"] = preferred
 
-        result = original(payload)
+        result = original_ml(payload)
         if isinstance(result, dict):
             result["engine"] = "OFERTA IA V10.6 ML OTIMIZADO"
             result["optimization"] = (
@@ -45,20 +46,37 @@ def install(app_module):
             )
         return result
 
-    app_module.mercadolivre_opportunities = optimized
+    def optimized_central(payload: dict):
+        # O painel usa o motor central. No V10.6, Mercado Livre deixa de ser
+        # opcional no modo rápido e passa a participar automaticamente.
+        payload = dict(payload or {})
+        payload["include_meli"] = True
+        result = original_central(payload)
+        if isinstance(result, dict):
+            result["engine"] = "OFERTA IA V10.6 CENTRAL"
+            result["mode"] = "completo"
+            result["optimization"] = "Shopee + Mercado Livre consultados automaticamente."
+        return result
 
-    # A rota já criada pelo FastAPI guarda uma referência direta à função.
-    # Trocamos somente essa referência para que chamadas HTTP também usem
-    # a versão otimizada.
-    target_path = "/api/mercadolivre/opportunities"
+    app_module.mercadolivre_opportunities = optimized_ml
+    app_module.opportunities_central = optimized_central
+
+    # As rotas FastAPI guardam referências diretas às funções. Atualizamos
+    # somente os dois endpoints envolvidos, sem substituir o app.py inteiro.
+    targets = {
+        "/api/mercadolivre/opportunities": optimized_ml,
+        "/api/opportunities-central": optimized_central,
+    }
     for route in app_module.app.router.routes:
-        if getattr(route, "path", None) == target_path:
-            route.endpoint = optimized
-            if hasattr(route, "dependant"):
-                try:
-                    from fastapi.dependencies.utils import get_dependant
-                    route.dependant = get_dependant(path=route.path, call=optimized)
-                except Exception:
-                    pass
+        endpoint = targets.get(getattr(route, "path", None))
+        if endpoint is None:
+            continue
+        route.endpoint = endpoint
+        if hasattr(route, "dependant"):
+            try:
+                from fastapi.dependencies.utils import get_dependant
+                route.dependant = get_dependant(path=route.path, call=endpoint)
+            except Exception:
+                pass
 
-    return optimized
+    return optimized_central
