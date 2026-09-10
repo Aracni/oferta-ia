@@ -85,11 +85,12 @@ def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None
 
 _v9_fetch_json = _oferta_fetch_json_optimized
 
-# PATCH V10.10 — aproveita o buy_box_winner sem exigir permalink no payload.
-# O Mercado Livre pode retornar item_id e preço do vencedor, mas sem permalink
-# utilizável no objeto de produto. Nesse caso não devemos cair imediatamente
-# no resolver antigo, que dispara /products/{id}/items e depois /items/{id}.
-# Usamos uma URL pública determinística do item e evitamos essas chamadas extras.
+# PATCH V10.11 — resolve produtos de catálogo diretamente.
+# O /products/{id} pode retornar buy_box_winner=null quando não existe uma
+# publicação vencedora. Nessa situação o resolver antigo dispara /products/{id}/items
+# e /items/{id} para tentar descobrir um anúncio. Isso gera muitas chamadas,
+# 403 e demora, além de descartar o próprio produto de catálogo.
+# Agora usamos o próprio PDP quando ele possui URL e preço mínimo utilizável.
 _OFERTA_ORIGINAL_CATALOG_TO_ITEM = _v9_catalog_to_item
 
 
@@ -115,9 +116,6 @@ def _oferta_catalog_to_item_resilient(token, product_id, rank_position=None, que
 
         title = detail.get("name") or winner.get("title") or "Produto Mercado Livre"
         if item_id and price and price > 0 and not _looks_like_accessory(title):
-            # Preferimos o permalink oficial quando existir. Quando o catálogo
-            # não o entrega, o endereço de produto por item_id continua sendo
-            # um link público válido e evita a consulta adicional ao /items.
             permalink = winner.get("permalink") or detail.get("permalink")
             if not permalink:
                 permalink = f"https://produto.mercadolivre.com.br/{item_id}"
@@ -135,7 +133,7 @@ def _oferta_catalog_to_item_resilient(token, product_id, rank_position=None, que
                     first = pictures[0]
                     if isinstance(first, dict):
                         image_url = first.get("secure_url") or first.get("url")
-                item = {
+                return {
                     "item_id": str(item_id),
                     "name": title,
                     "url": permalink,
@@ -151,10 +149,57 @@ def _oferta_catalog_to_item_resilient(token, product_id, rank_position=None, que
                     "discovery_query": query,
                     "catalog_product_id": product_id,
                 }
-                return item
 
-    # Fallback somente quando o detalhe do produto não trouxe um vencedor útil.
-    # A função original mantém a compatibilidade com os demais formatos.
+    # Sem vencedor: se o próprio PDP está ativo e oferece preço mínimo,
+    # tratamos o produto de catálogo como oportunidade de produto. Isso evita
+    # a cascata /products/{id}/items -> /items/{id} que estava causando 403.
+    price_range = detail.get("buy_box_winner_price_range")
+    min_price = None
+    if isinstance(price_range, dict):
+        minimum = price_range.get("min")
+        if isinstance(minimum, dict):
+            min_price = minimum.get("price")
+    try:
+        min_price = float(min_price) if min_price not in (None, "") else None
+    except Exception:
+        min_price = None
+
+    title = detail.get("name") or "Produto Mercado Livre"
+    permalink = detail.get("permalink")
+    if (
+        str(detail.get("status", "")).lower() == "active"
+        and min_price
+        and min_price > 0
+        and isinstance(permalink, str)
+        and permalink.startswith("http")
+        and not _looks_like_accessory(title)
+    ):
+        pictures = detail.get("pictures")
+        image_url = None
+        if isinstance(pictures, list) and pictures:
+            first = pictures[0]
+            if isinstance(first, dict):
+                image_url = first.get("secure_url") or first.get("url")
+        return {
+            "item_id": str(product_id),
+            "name": title,
+            "url": permalink,
+            "current_price": min_price,
+            "old_price": None,
+            "discount_rate": None,
+            "category": detail.get("domain_id"),
+            "image_url": image_url,
+            "seller_id": None,
+            "rating": None,
+            "marketplace": "mercadolivre",
+            "rank_position": rank_position,
+            "discovery_query": query,
+            "catalog_product_id": product_id,
+            "catalog_only": True,
+        }
+
+    # Fallback somente quando o PDP realmente não é utilizável.
+    # Mantemos a compatibilidade com formatos antigos/USER_PRODUCT.
     try:
         return _OFERTA_ORIGINAL_CATALOG_TO_ITEM(token, product_id, rank_position, query)
     except Exception:
