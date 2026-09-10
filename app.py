@@ -190,7 +190,7 @@ $('refreshLogBtn')?.addEventListener('click',refreshV94Log);
 $('copyLogBtn')?.addEventListener('click',copyV94Log);
 $('clearLogBtn')?.addEventListener('click',()=>{ $('v94Log').textContent='Tela limpa. Execute ou atualize o log.'; $('v94LogStatus').textContent=''; });
 
-async function loadOpportunities(){const list=$('opportunityList'),status=$('opportunityStatus'),btn=$('runOpportunities');btn.disabled=true;btn.textContent='⏳ Procurando...';loading(list,'Buscando candidatos e priorizando os melhores...');status.textContent='Primeiro o ranking; depois o aprofundamento dos melhores produtos.';try{const d=await jsonFetch('/api/mercadolivre/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})});window.currentOpportunities=d.items||d.opportunities||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.';await refreshV94Log()}catch(e){list.innerHTML='';status.textContent='⚠️ '+e.message;await refreshV94Log()}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
+async function loadOpportunities(){const list=$('opportunityList'),status=$('opportunityStatus'),btn=$('runOpportunities');btn.disabled=true;btn.textContent='⏳ Procurando...';loading(list,'Buscando candidatos e priorizando os melhores...');status.textContent='Primeiro o ranking; depois o aprofundamento dos melhores produtos.';try{const d=await jsonFetch('/api/opportunities-central',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})});window.currentOpportunities=d.items||d.opportunities||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.';await refreshV94Log()}catch(e){list.innerHTML='';status.textContent='⚠️ '+e.message;await refreshV94Log()}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
 async function searchProducts(){const q=$('productSearch').value.trim(),out=$('productResults'),status=$('productSearchStatus');if(!q){status.textContent='Digite um produto ou nicho.';return}loading(out,'Pesquisando e filtrando resultados...');status.textContent='Buscando apenas produtos compatíveis com sua pesquisa.';try{const d=await jsonFetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number($('productLimit').value||10)})});window.currentSearchProducts=d.items||[];out.innerHTML=window.currentSearchProducts.length?window.currentSearchProducts.map((p,i)=>productCard(p,i,'products')).join(''):'<div class="empty">Nenhum produto principal relevante encontrado.</div>';status.textContent=`✅ ${window.currentSearchProducts.length} produto(s) relevante(s).`}catch(e){out.innerHTML='';status.textContent='⚠️ '+e.message}}
 async function addProduct(i){const p=window.currentSearchProducts?.[i];if(!p)return;try{await jsonFetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name,store:p.store||'Mercado Livre',url:p.url,category:p.category,current_price:p.current_price,old_price:p.old_price,image_url:p.image_url,marketplace:p.marketplace||'mercadolivre',item_id:p.item_id})});alert('Produto salvo no OFERTA IA.');loadDashboard()}catch(e){alert(e.message)}}
 async function approveOpportunity(i){const p=window.currentOpportunities?.[i];if(!p)return;const btns=document.querySelectorAll('#opportunityList button');btns.forEach(b=>b.disabled=true);try{const d=await jsonFetch('/api/approve-and-publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:p,channels:channels()})});alert(d.message||'Oferta aprovada.');loadOffersCount()}catch(e){alert(e.message)}finally{btns.forEach(b=>b.disabled=false)}}
@@ -1034,6 +1034,329 @@ def _product_from_catalog(token, catalog_item, rank_position=None, query=''):
     except Exception:
         return None
 
+
+# ============================================================
+# V10 — SHopee provider + motor central de oportunidades
+# As credenciais ficam exclusivamente no ambiente do Render.
+# Nenhum segredo é registrado nos logs ou retornado pela API.
+# ============================================================
+SHOPEE_APP_ID = os.getenv("SHOPEE_APP_ID", "").strip()
+SHOPEE_APP_SECRET = os.getenv("SHOPEE_APP_SECRET", "").strip()
+SHOPEE_GRAPHQL_URL = "https://open-api.affiliate.shopee.com.br/graphql"
+
+SHOPEE_PRODUCT_QUERY = """
+query ProductOffers($keyword: String, $sortType: Int, $page: Int, $limit: Int) {
+  productOfferV2(keyword: $keyword, sortType: $sortType, page: $page, limit: $limit) {
+    nodes {
+      itemId
+      commissionRate
+      sellerCommissionRate
+      shopeeCommissionRate
+      commission
+      sales
+      priceMax
+      priceMin
+      productCatIds
+      ratingStar
+      priceDiscountRate
+      imageUrl
+      productName
+      shopId
+      shopName
+      shopType
+      productLink
+      offerLink
+      periodStartTime
+      periodEndTime
+    }
+    pageInfo { page limit hasNextPage }
+  }
+}
+"""
+
+def _shopee_credentials_ready():
+    return bool(SHOPEE_APP_ID and SHOPEE_APP_SECRET)
+
+
+def _shopee_request(query, variables=None, timeout=20):
+    if not _shopee_credentials_ready():
+        raise RuntimeError("Configure SHOOPEE_APP_ID e SHOOPEE_APP_SECRET no Render.")
+    payload = {
+        "query": query,
+        "operationName": "ProductOffers",
+        "variables": variables or {},
+    }
+    # A assinatura é calculada sobre o payload JSON enviado no corpo.
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    timestamp = str(int(time.time()))
+    factor = f"{SHOPEE_APP_ID}{timestamp}{body}{SHOPEE_APP_SECRET}"
+    signature = hashlib.sha256(factor.encode("utf-8")).hexdigest()
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID},Timestamp={timestamp},Signature={signature}",
+        "User-Agent": "OFERTA-IA/10.0",
+    }
+    response = requests.post(SHOPEE_GRAPHQL_URL, data=body.encode("utf-8"), headers=headers, timeout=timeout)
+    try:
+        data = response.json()
+    except Exception:
+        data = {"raw": response.text[:1000]}
+    if response.status_code >= 400:
+        raise RuntimeError(f"Shopee HTTP {response.status_code}: {str(data)[:700]}")
+    if isinstance(data, dict) and data.get("errors"):
+        raise RuntimeError(f"Shopee GraphQL: {str(data['errors'])[:700]}")
+    return data
+
+
+def _shopee_num(v, default=None):
+    try:
+        if v in (None, ""):
+            return default
+        return float(v)
+    except Exception:
+        return default
+
+
+def _shopee_rate_percent(v):
+    n = _shopee_num(v)
+    if n is None:
+        return None
+    # A API costuma representar 0.15 como 15%.
+    return n * 100 if n <= 1 else n
+
+
+def _shopee_demand_score(sales):
+    n = _shopee_num(sales)
+    if n is None or n <= 0:
+        return 45.0
+    # Escala logarítmica para evitar que poucos campeões dominem tudo.
+    score = 20 + (math.log10(n + 1) / 6.0) * 80
+    return round(max(0, min(100, score)), 2)
+
+
+def _shopee_commission_score(rate):
+    r = _shopee_num(rate)
+    if r is None or r <= 0:
+        return 0.0
+    if r <= 2: return 15.0
+    if r <= 4: return 30.0
+    if r <= 6: return 45.0
+    if r <= 8: return 60.0
+    if r <= 10: return 75.0
+    if r <= 12: return 85.0
+    if r <= 14: return 92.0
+    if r <= 15: return 97.0
+    return 100.0
+
+
+def _shopee_discount_score(discount):
+    d = _shopee_num(discount)
+    if d is None or d <= 0: return 0.0
+    if d <= 4: return 15.0
+    if d <= 9: return 35.0
+    if d <= 14: return 55.0
+    if d <= 19: return 70.0
+    if d <= 24: return 80.0
+    if d <= 29: return 87.0
+    if d <= 39: return 94.0
+    if d <= 49: return 98.0
+    return 100.0
+
+
+def _shopee_rating_score(rating):
+    r = _shopee_num(rating)
+    if r is None: return 0.0
+    if r < 3: return 0.0
+    if r < 3.5: return 30.0
+    if r < 4: return 50.0
+    if r < 4.3: return 65.0
+    if r < 4.5: return 75.0
+    if r < 4.7: return 85.0
+    if r < 4.9: return 93.0
+    if r < 5: return 98.0
+    return 100.0
+
+
+def _shopee_price_score(price):
+    p = _shopee_num(price)
+    if p is None or p <= 0: return 0.0
+    if p <= 80: return 92.0
+    if p <= 150: return 100.0
+    if p <= 300: return 94.0
+    if p <= 600: return 82.0
+    if p <= 1200: return 65.0
+    return 45.0
+
+
+def _shopee_trend_score(sales):
+    # A API de produtos fornece vendas acumuladas, não um histórico temporal.
+    # Portanto tendência permanece neutra/indisponível nesta primeira versão.
+    return 50.0
+
+
+def _shopee_potential_score(demand, commission, discount, price, rating, trend):
+    return round(demand*.30 + commission*.20 + discount*.15 + price*.10 + rating*.10 + trend*.15, 2)
+
+
+def _shopee_analyze(node, rank_position=None, query=""):
+    name = (node.get("productName") or "").strip()
+    if not name:
+        return None
+    cur = _shopee_num(node.get("priceMin"))
+    max_price = _shopee_num(node.get("priceMax"))
+    commission_rate = _shopee_rate_percent(node.get("commissionRate"))
+    discount = _shopee_num(node.get("priceDiscountRate"))
+    rating = _shopee_num(node.get("ratingStar"))
+    sales = _shopee_num(node.get("sales"))
+    commission_value = _shopee_num(node.get("commission"))
+    if commission_value is None and cur is not None and commission_rate is not None:
+        commission_value = cur * commission_rate / 100
+
+    # A API não informa quantos afiliados disputam aquele produto.
+    # Logo, não inventamos concorrência: usamos 50 como ponto neutro estimado.
+    competition_index = 50.0
+    demand = _shopee_demand_score(sales)
+    commission = _shopee_commission_score(commission_rate)
+    low_competition = 100 - competition_index
+    discount_score = _shopee_discount_score(discount)
+    price_score = _shopee_price_score(cur)
+    rating_score = _shopee_rating_score(rating)
+    trend_score = _shopee_trend_score(sales)
+    potential = _shopee_potential_score(demand, commission, discount_score, price_score, rating_score, trend_score)
+    score = round(
+        demand*.25 + commission*.20 + low_competition*.20 +
+        discount_score*.10 + price_score*.10 + rating_score*.05 +
+        trend_score*.05 + potential*.05, 2
+    )
+    data_confidence = "média" if commission_rate is not None and cur is not None else "baixa"
+    return {
+        "name": name,
+        "store": node.get("shopName") or "Shopee",
+        "marketplace": "shopee",
+        "item_id": str(node.get("itemId")) if node.get("itemId") is not None else None,
+        "shop_id": str(node.get("shopId")) if node.get("shopId") is not None else None,
+        "url": node.get("productLink"),
+        "affiliate_url": node.get("offerLink"),
+        "image_url": node.get("imageUrl"),
+        "current_price": cur,
+        "old_price": round(cur/(1-discount/100), 2) if cur is not None and discount and discount < 100 else None,
+        "category": ",".join(str(x) for x in (node.get("productCatIds") or [])) or None,
+        "sales": sales,
+        "rating": rating,
+        "discount_rate": discount,
+        "commission_rate": commission_rate,
+        "seller_commission_rate": _shopee_rate_percent(node.get("sellerCommissionRate")),
+        "shopee_commission_rate": _shopee_rate_percent(node.get("shopeeCommissionRate")),
+        "commission_value": commission_value,
+        "competition_index": competition_index,
+        "competition_estimated": True,
+        "data_confidence": data_confidence,
+        "rank_position": rank_position,
+        "discovery_query": query,
+        "opportunity_score": score,
+        "opportunity_label": _v9_classification(score)[0],
+        "score_breakdown": {
+            "demanda": round(demand,2), "comissao": round(commission,2),
+            "baixa_concorrencia": round(low_competition,2), "desconto": round(discount_score,2),
+            "preco": round(price_score,2), "avaliacao": round(rating_score,2),
+            "tendencia": round(trend_score,2), "potencial": round(potential,2)
+        },
+    }
+
+
+def _shopee_search_products(keyword=None, limit=20):
+    variables = {"keyword": keyword or None, "sortType": 2, "page": 1, "limit": max(1, min(50, int(limit)))}
+    data = _shopee_request(SHOPEE_PRODUCT_QUERY, variables)
+    nodes = (((data or {}).get("data") or {}).get("productOfferV2") or {}).get("nodes") or []
+    products = []
+    for idx, node in enumerate(nodes, 1):
+        p = _shopee_analyze(node, idx, keyword or "")
+        if p:
+            products.append(p)
+    products.sort(key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+    return products
+
+
+@app.get("/api/shopee/status")
+def shopee_status():
+    return {"configured": _shopee_credentials_ready(), "provider": "shopee", "api": SHOPEE_GRAPHQL_URL}
+
+
+@app.get("/api/shopee/test")
+def shopee_test():
+    if not _shopee_credentials_ready():
+        return {"status":"not_configured", "message":"Configure as credenciais da Shopee no Render."}
+    try:
+        products = _shopee_search_products(None, 5)
+        return {"status":"ok", "provider":"shopee", "returned":len(products), "items":products}
+    except Exception as exc:
+        _v93_log("SHOPEE", "Teste da API falhou", error=str(exc)[:300])
+        return {"status":"error", "provider":"shopee", "message":str(exc)[:500]}
+
+
+@app.post("/api/shopee/opportunities")
+def shopee_opportunities(payload: dict):
+    niche = (payload.get("niche") or "").strip()
+    limit = max(5, min(20, int(payload.get("limit") or 10)))
+    try:
+        items = _shopee_search_products(niche or None, min(50, max(limit * 2, 20)))
+        selected = items[:limit]
+        return {"status":"ok", "engine":"OFERTA IA V10", "marketplace":"shopee", "items":selected, "opportunities":selected, "returned":len(selected), "candidates_found":len(items), "message":f"Shopee: {len(selected)} oportunidade(s) analisada(s)."}
+    except Exception as exc:
+        _v93_log("SHOPEE", "Garimpo falhou", error=str(exc)[:300])
+        raise HTTPException(502, f"Falha na API da Shopee: {str(exc)[:500]}")
+
+
+@app.post("/api/opportunities-central")
+def opportunities_central(payload: dict):
+    """Motor central V10: Shopee é um provider; ML continua independente."""
+    niche = (payload.get("niche") or "").strip()
+    limit = max(5, min(20, int(payload.get("limit") or 10)))
+    all_items = []
+    diagnostics = []
+
+    if _shopee_credentials_ready():
+        try:
+            shopee_items = _shopee_search_products(niche or None, min(50, max(limit * 2, 20)))
+            all_items.extend(shopee_items)
+            diagnostics.append(f"Shopee: {len(shopee_items)} candidatos")
+        except Exception as exc:
+            diagnostics.append(f"Shopee indisponível: {str(exc)[:180]}")
+    else:
+        diagnostics.append("Shopee não configurada")
+
+    # ML entra somente se houver token válido, sem deixar uma falha do ML derrubar a Shopee.
+    try:
+        token = _v9_valid_meli_token()
+        if token:
+            try:
+                ml_payload = {"niche": niche, "limit": limit}
+                ml = mercadolivre_opportunities(ml_payload)
+                ml_items = ml.get("items") or ml.get("opportunities") or []
+                all_items.extend(ml_items)
+                diagnostics.append(f"Mercado Livre: {len(ml_items)} candidatos")
+            except Exception as exc:
+                diagnostics.append(f"Mercado Livre indisponível: {str(exc)[:180]}")
+        else:
+            diagnostics.append("Mercado Livre sem token válido")
+    except Exception as exc:
+        diagnostics.append(f"Mercado Livre não consultado: {str(exc)[:180]}")
+
+    unique = {}
+    for item in all_items:
+        key = f"{item.get('marketplace')}:{item.get('item_id') or item.get('url') or item.get('name')}"
+        if key not in unique or float(item.get("opportunity_score") or 0) > float(unique[key].get("opportunity_score") or 0):
+            unique[key] = item
+    ranked = sorted(unique.values(), key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+    selected = ranked[:limit]
+    return {
+        "status":"ok", "engine":"OFERTA IA V10", "mode":"central",
+        "niche":niche or "todos", "items":selected, "opportunities":selected,
+        "returned":len(selected), "candidates_found":len(ranked),
+        "diagnostic":diagnostics,
+        "message":" · ".join(diagnostics) if diagnostics else "Garimpo concluído."
+    }
 
 @app.post('/api/mercadolivre/opportunities')
 def mercadolivre_opportunities(payload: dict):
