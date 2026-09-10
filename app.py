@@ -1,6 +1,6 @@
 """OFERTA IA application loader.
 
-V11.7: resolvedor independente do Mercado Livre + endpoint central que
+V11.8: resolvedor independente do Mercado Livre + endpoint central que
 combina explicitamente os resultados dos dois marketplaces antes do ranking.
 """
 import re
@@ -26,7 +26,7 @@ _V11_PRODUCT_INDEX = {}
 _V11_CATALOG_CACHE = {}
 _V11_CATALOG_TTL = 300
 _V11_LOCK = threading.RLock()
-_V11_VERSION = "11.7"
+_V11_VERSION = "11.8"
 
 
 def _v11_log(stage, message, trace=None, **kwargs):
@@ -284,7 +284,7 @@ def _v11_public_search(token, item_id, trace=None):
         response = requests.get(
             f"https://api.mercadolibre.com/sites/{site}/search",
             params={"q": str(item_id), "limit": 10},
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.7"},
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.8"},
             timeout=5,
         )
         data = response.json() if response.content else {}
@@ -354,37 +354,39 @@ _V11_ORIGINAL_OPPORTUNITIES_CENTRAL = opportunities_central
 
 
 def _v11_marketplace_mix(items, limit):
+    """Prioriza qualidade; não força vagas com score baixo só para equilibrar marketplaces."""
     items = list(items or [])
     limit = max(1, int(limit or 10))
     if not items:
         return []
-    ml = [x for x in items if str(x.get("marketplace") or "").lower() == "mercadolivre"]
-    sh = [x for x in items if str(x.get("marketplace") or "").lower() == "shopee"]
+    ml = sorted([x for x in items if str(x.get("marketplace") or "").lower() == "mercadolivre"], key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+    sh = sorted([x for x in items if str(x.get("marketplace") or "").lower() == "shopee"], key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
     ranked = sorted(items, key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
     picks = []
     seen = set()
-    # Reserva até 2 vagas de cada marketplace quando ambos estão disponíveis.
-    for group in (ml[:2], sh[:2]):
-        for item in group:
-            key = f"{item.get('marketplace')}:{item.get('item_id') or item.get('url') or item.get('name')}"
-            if key not in seen and len(picks) < limit:
-                picks.append(item)
+
+    # Garante presença dos dois marketplaces apenas quando há uma oportunidade
+    # minimamente forte. Assim, um candidato ML fraco não entra só para preencher vaga.
+    for group in (ml, sh):
+        if group:
+            candidate = group[0]
+            score = float(candidate.get("opportunity_score") or 0)
+            if score >= 60.0 and len(picks) < limit:
+                key = f"{candidate.get('marketplace')}:{candidate.get('item_id') or candidate.get('url') or candidate.get('name')}"
+                picks.append(candidate)
                 seen.add(key)
+
     for item in ranked:
         key = f"{item.get('marketplace')}:{item.get('item_id') or item.get('url') or item.get('name')}"
         if key not in seen and len(picks) < limit:
             picks.append(item)
             seen.add(key)
+
     picks.sort(key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
     return picks[:limit]
 
 
 def _v11_opportunities_central(payload: dict):
-    """
-    V11.7: o endpoint central não usa mais o resultado já truncado do
-    motor antigo. Ele chama a Shopee uma vez, chama o Mercado Livre uma vez,
-    une os candidatos reais e só então faz o ranking/diversidade final.
-    """
     body = dict(payload or {})
     body["include_meli"] = False
     try:
@@ -392,13 +394,10 @@ def _v11_opportunities_central(payload: dict):
     except Exception:
         limit = 10
 
-    # 1) Shopee: usamos o motor original, mas sem pedir Mercado Livre.
     sh_result = _V11_ORIGINAL_OPPORTUNITIES_CENTRAL(body)
     sh_items = list(sh_result.get("items") or sh_result.get("opportunities") or [])
     diagnostics = list(sh_result.get("diagnostic") or [])
 
-    # 2) Mercado Livre: consulta independente, que já usa o resolvedor V11
-    # para Product -> catálogo -> oferta real sem /items/{id} direto.
     ml_items = []
     try:
         token = _v9_valid_meli_token()
@@ -421,11 +420,11 @@ def _v11_opportunities_central(payload: dict):
     mixed = _v11_marketplace_mix(list(unique.values()), limit)
     ml_count = len(ml_items)
     sh_count = len(sh_items)
-    diagnostics.append(f"V11.7: Mercado Livre={ml_count} · Shopee={sh_count} · retorno={len(mixed)}")
+    diagnostics.append(f"V11.8: Mercado Livre={ml_count} · Shopee={sh_count} · retorno={len(mixed)} · ranking por qualidade")
 
     result = dict(sh_result)
     result["mode"] = "completo"
-    result["engine"] = "OFERTA IA V11.7"
+    result["engine"] = "OFERTA IA V11.8"
     result["items"] = mixed
     result["opportunities"] = mixed
     result["returned"] = len(mixed)
@@ -434,9 +433,6 @@ def _v11_opportunities_central(payload: dict):
     result["message"] = " · ".join(diagnostics)
     return result
 
-
-# FastAPI guarda o callable em route.dependant.call. Trocamos os dois
-# ponteiros para garantir que o endpoint realmente execute V11.7.
 for _route in getattr(app, "routes", []):
     if getattr(_route, "path", None) == "/api/opportunities-central" and "POST" in (getattr(_route, "methods", set()) or set()):
         _route.endpoint = _v11_opportunities_central
@@ -448,7 +444,7 @@ for _route in getattr(app, "routes", []):
 try:
     HTML = HTML.replace(
         "status.textContent='⚡ Modo rápido: Shopee primeiro. Mercado Livre não bloqueia o garimpo.';",
-        "status.textContent='⚡ Modo completo: Shopee + Mercado Livre. Aguarde a análise dos dois marketplaces.';",
+        "status.textContent='⚡ Modo completo: Shopee + Mercado Livre. O ranking prioriza qualidade.';",
     )
     HTML = HTML.replace(
         "body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})",
@@ -457,4 +453,4 @@ try:
 except Exception:
     pass
 
-print("[V11.7] central real: Shopee + Mercado Livre consultados separadamente; ranking multimarketplace; /items/{id} continua bloqueado", flush=True)
+print("[V11.8] ranking multimarketplace por qualidade; não força candidato fraco só para equilibrar marketplaces; /items/{id} continua bloqueado", flush=True)
