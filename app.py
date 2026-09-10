@@ -19,15 +19,11 @@ except Exception as exc:
 
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
-# PATCH V10.6 — acelera o garimpo do Mercado Livre.
-# Os logs mostraram que /items/{id} e /products/{id}/items estavam retornando
-# 403 com o token da aplicação. O código anterior fazia primeiro a chamada
-# autenticada e só depois repetia a mesma consulta sem token. Isso duplicava
-# requisições e aumentava bastante o tempo da pesquisa.
-#
-# Para recursos de catálogo, tentamos diretamente a consulta pública. Mantemos
-# produtos privados/protegidos fora deste caminho. Também usamos um cache curto
-# para evitar repetir a mesma consulta durante o mesmo garimpo.
+# PATCH V10.7 — acelera o garimpo do Mercado Livre sem recursão.
+# Guardamos a função original antes de substituí-la pelo wrapper otimizado.
+# O V10.6 substituía _v9_fetch_json e depois o próprio wrapper chamava
+# _v9_fetch_json, causando RecursionError e zerando toda a coleta.
+_OFERTA_ORIGINAL_FETCH_JSON = _v9_fetch_json
 _OFERTA_PUBLIC_CACHE = {}
 _OFERTA_PUBLIC_CACHE_TTL = 300
 
@@ -40,8 +36,10 @@ def _oferta_public_catalog_url(url):
 
 
 def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
+    # Endpoints protegidos e todos os demais continuam usando exatamente
+    # o comportamento original do núcleo.
     if not _oferta_public_catalog_url(url):
-        return _v9_fetch_json(token, url, params, timeout, trace, stage)
+        return _OFERTA_ORIGINAL_FETCH_JSON(token, url, params, timeout, trace, stage)
 
     safe_params = dict(params or {})
     cache_key = (url, tuple(sorted((str(k), str(v)) for k, v in safe_params.items())))
@@ -57,9 +55,8 @@ def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None
             params=safe_params,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "OFERTA-IA/10.6",
+                "User-Agent": "OFERTA-IA/10.7",
             },
-            # Catálogo público não deve segurar o garimpo por vários segundos.
             timeout=min(int(timeout or 5), 5),
         )
         try:
@@ -85,4 +82,5 @@ def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None
         return None, None
 
 
+# Só agora substituímos a função global usada pelo núcleo.
 _v9_fetch_json = _oferta_fetch_json_optimized
