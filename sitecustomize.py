@@ -5,6 +5,31 @@ Quando PORT está presente, o app é carregado e os patches de inicialização s
 """
 import os
 
+# Compatibilidade Mercado Livre: a API oficial usa api.mercadolibre.com.
+# Alguns caminhos legados podem montar api.mercadolivre.com; normalize antes
+# de qualquer chamada HTTP para evitar falhas de resolução DNS.
+try:
+    import requests
+    from urllib.parse import urlsplit, urlunsplit
+
+    _oferta_original_session_request = requests.sessions.Session.request
+
+    def _oferta_normalized_session_request(self, method, url, *args, **kwargs):
+        try:
+            parts = urlsplit(str(url))
+            if parts.hostname == "api.mercadolivre.com":
+                netloc = "api.mercadolibre.com"
+                if parts.port:
+                    netloc += f":{parts.port}"
+                url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+        except Exception:
+            pass
+        return _oferta_original_session_request(self, method, url, *args, **kwargs)
+
+    requests.sessions.Session.request = _oferta_normalized_session_request
+except Exception:
+    pass
+
 if os.environ.get("PORT"):
     try:
         import app as _oferta_app
