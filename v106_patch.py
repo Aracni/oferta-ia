@@ -34,7 +34,7 @@ def _error_text(exc):
 
 
 def _append_log(app, stage, message, **fields):
-    """Usa o mesmo buffer do diagnóstico V9.8, sem duplicar tokens/segredos."""
+    """Escreve no mesmo buffer global usado pelos endpoints V9.8."""
     try:
         safe = {
             k: v for k, v in fields.items()
@@ -48,25 +48,27 @@ def _append_log(app, stage, message, **fields):
             max_lines = int(getattr(app, "_V94_LOG_MAX_LINES", 500) or 500)
             if len(buffer) > max_lines:
                 del buffer[:-max_lines]
-        logger = getattr(app, "logger", None)
+        logger = getattr(app, "_oferta_logger", None)
         if logger:
             logger.info("[%s] %s%s", stage, message, suffix)
     except Exception:
-        # O diagnóstico nunca pode derrubar o motor principal.
         pass
 
 
 def _install_log_bridge(app):
-    """Publica uma referência segura para o buffer global já existente no app.py."""
+    """Faz o objeto FastAPI e o módulo app.py usarem a mesma lista de log."""
     try:
-        # app.py mantém estas variáveis no módulo; o FastAPI app não as possui.
-        # Guardamos uma lista própria no objeto e sincronizamos no helper abaixo.
+        import app as app_module
+        if not isinstance(getattr(app_module, "_V94_LOG_BUFFER", None), list):
+            app_module._V94_LOG_BUFFER = []
+        app._V94_LOG_BUFFER = app_module._V94_LOG_BUFFER
+        app._V94_LOG_MAX_LINES = int(getattr(app_module, "_V94_LOG_MAX_LINES", 500) or 500)
+        app._oferta_logger = getattr(app_module, "logger", None)
+    except Exception:
         if not hasattr(app, "_V94_LOG_BUFFER"):
             app._V94_LOG_BUFFER = []
         if not hasattr(app, "_V94_LOG_MAX_LINES"):
             app._V94_LOG_MAX_LINES = 500
-    except Exception:
-        pass
 
 
 def install(app):
@@ -156,5 +158,5 @@ def install(app):
                 break
 
     app.V107_PATCH_ACTIVE = True
-    _append_log(app, "BOOT", "Patch V10.7 ativo")
+    _append_log(app, "BOOT", "Patch V10.7 ativo — diagnóstico persistente habilitado")
     print("[V10.7] Patch ativo — diagnóstico persistente habilitado", flush=True)
