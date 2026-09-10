@@ -4,6 +4,8 @@ A versão integral do aplicativo permanece congelada no commit-base conhecido.
 Este carregador restaura essa versão em memória para que os patches de runtime
 possam evoluir sem duplicar o arquivo monolítico no repositório.
 """
+import html as _html
+import json
 import re
 import time
 import urllib.request
@@ -18,10 +20,11 @@ except Exception as exc:
 
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
-# PATCH V10.15 — catálogo sem cascata + recuperação por página pública.
-# O endpoint /sites/MLB/search continua devolvendo 403 no ambiente do Render.
-# Portanto, quando o PDP da API não expõe preço, usamos a própria página pública
-# do produto como segunda rota, sem token e sem voltar para /products/{id}/items.
+# PATCH V10.16 — recuperação robusta de preço + circuit breaker da busca pública.
+# O endpoint /sites/MLB/search está devolvendo 403 no Render. Não insistimos nele
+# depois do primeiro bloqueio da execução. Para PDPs sem preço, tentamos primeiro
+# estruturas JSON/HTML da própria página pública, sem voltar à cascata antiga
+# /products/{id}/items -> /items/{id}.
 _OFERTA_ORIGINAL_FETCH_JSON = _v9_fetch_json
 _OFERTA_PUBLIC_CACHE = {}
 _OFERTA_PUBLIC_CACHE_TTL = 300
@@ -29,6 +32,7 @@ _OFERTA_SEARCH_CACHE = {}
 _OFERTA_SEARCH_CACHE_TTL = 300
 _OFERTA_PAGE_CACHE = {}
 _OFERTA_PAGE_CACHE_TTL = 300
+_OFERTA_SEARCH_BLOCKED = False
 
 
 def _oferta_public_catalog_url(url):
@@ -38,17 +42,15 @@ def _oferta_public_catalog_url(url):
 def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
     if not _oferta_public_catalog_url(url):
         return _OFERTA_ORIGINAL_FETCH_JSON(token, url, params, timeout, trace, stage)
-
     safe_params = dict(params or {})
     cache_key = (url, tuple(sorted((str(k), str(v)) for k, v in safe_params.items())))
     cached = _OFERTA_PUBLIC_CACHE.get(cache_key)
     if cached and time.time() - cached[0] <= _OFERTA_PUBLIC_CACHE_TTL:
         _v93_log(stage, "Catálogo atendido pelo cache", trace=trace, url=url)
         return cached[1], cached[2]
-
     try:
         _v93_log(stage, "Consulta de catálogo com autorização", trace=trace, url=url)
-        response = requests.get(url, params=safe_params, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/10.15"}, timeout=min(int(timeout or 5), 5))
+        response = requests.get(url, params=safe_params, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/10.16"}, timeout=min(int(timeout or 5), 5))
         try:
             data = response.json()
         except Exception:
@@ -122,10 +124,47 @@ def _oferta_pick_search_item(payload, source_title=""):
     return None
 
 
+def _oferta_clean_text(value):
+    if value is None:
+        return ""
+    text = _html.unescape(str(value))
+    text = text.replace("\\u0022", '"').replace("\\u002F", "/").replace("\\/", "/")
+    text = re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), text)
+    return text
+
+
+def _oferta_structured_price(obj, depth=0):
+    if depth > 5 or obj is None:
+        return None
+    if isinstance(obj, dict):
+        for key in ("price", "lowPrice", "min_price", "sale_price", "current_price"):
+            if key in obj:
+                value = _oferta_number(obj.get(key))
+                if value is not None and 0 < value < 1000000:
+                    return value
+        offers = obj.get("offers")
+        value = _oferta_structured_price(offers, depth + 1)
+        if value is not None:
+            return value
+        for key in ("data", "props", "pageProps", "initialState", "state", "product", "item"):
+            if key in obj:
+                value = _oferta_structured_price(obj.get(key), depth + 1)
+                if value is not None:
+                    return value
+    elif isinstance(obj, list):
+        for child in obj[:30]:
+            value = _oferta_structured_price(child, depth + 1)
+            if value is not None:
+                return value
+    return None
+
+
 def _oferta_extract_page_product(html, fallback_title="", fallback_url="", product_id=""):
     if not isinstance(html, str) or not html:
         return None
 
+    raw_html = html
+    decoded = _oferta_clean_text(html)
     title = fallback_title
     title_patterns = [
         r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
@@ -133,44 +172,90 @@ def _oferta_extract_page_product(html, fallback_title="", fallback_url="", produ
         r'"title"\s*:\s*"([^"\n]{4,220})"',
     ]
     for pattern in title_patterns:
-        m = re.search(pattern, html, re.I | re.S)
+        m = re.search(pattern, decoded, re.I | re.S)
         if m:
             candidate = re.sub(r"<[^>]+>", " ", m.group(1))
-            candidate = re.sub(r"\s+", " ", candidate).strip()
+            candidate = re.sub(r"\s+", " ", _html.unescape(candidate)).strip()
             if len(candidate) >= 4:
                 title = candidate
                 break
 
     price = None
-    price_patterns = [
-        r'"price"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
-        r'"amount"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
-        r'itemprop=["\']price["\'][^>]+content=["\']([0-9]+(?:\.[0-9]+)?)',
-        r'R\$\s*([0-9]{1,6}(?:\.[0-9]{3})*(?:,[0-9]{2})?)',
-    ]
-    for pattern in price_patterns:
-        for m in re.finditer(pattern, html, re.I | re.S):
-            raw = m.group(1).replace(".", "").replace(",", ".") if "," in m.group(1) else m.group(1)
-            value = _oferta_number(raw)
-            if value is not None and 0 < value < 1000000:
-                price = value
-                break
+    price_source = None
+
+    # 1) JSON-LD é a fonte mais estável quando presente.
+    for block in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', decoded, re.I | re.S):
+        block = block.strip()
+        try:
+            payload = json.loads(block)
+            price = _oferta_structured_price(payload)
+        except Exception:
+            try:
+                price = _oferta_structured_price(json.loads(_html.unescape(block)))
+            except Exception:
+                price = None
         if price is not None:
+            price_source = "jsonld"
             break
 
+    # 2) Estado inicial embutido no HTML/SSR, incluindo JSON escapado.
     if price is None:
+        structured_patterns = [
+            r'(?:(?:"|\\")price(?:"|\\")|(?:"|\\")lowPrice(?:"|\\"))\s*:\s*(?:"|\\")?([0-9]+(?:\.[0-9]+)?)(?:"|\\")?',
+            r'(?:(?:"|\\")amount(?:"|\\"))\s*:\s*(?:"|\\")?([0-9]+(?:\.[0-9]+)?)(?:"|\\")?',
+            r'(?:data-price|data-testid=["\']price["\'])[^>]{0,160}?(?:content|value|data-value)?=["\']([0-9]+(?:\.[0-9]+)?)["\']',
+        ]
+        for pattern in structured_patterns:
+            for m in re.finditer(pattern, decoded, re.I | re.S):
+                value = _oferta_number(m.group(1))
+                if value is not None and 0 < value < 1000000:
+                    price = value
+                    price_source = "embedded"
+                    break
+            if price is not None:
+                break
+
+    # 3) HTML visual. Mantemos o parser antigo como último recurso.
+    if price is None:
+        price_patterns = [
+            r'itemprop=["\']price["\'][^>]+content=["\']([0-9]+(?:\.[0-9]+)?)["\']',
+            r'R\$\s*([0-9]{1,6}(?:\.[0-9]{3})*(?:,[0-9]{2})?)',
+        ]
+        for pattern in price_patterns:
+            for m in re.finditer(pattern, decoded, re.I | re.S):
+                raw = m.group(1).replace(".", "").replace(",", ".") if "," in m.group(1) else m.group(1)
+                value = _oferta_number(raw)
+                if value is not None and 0 < value < 1000000:
+                    price = value
+                    price_source = "visible"
+                    break
+            if price is not None:
+                break
+
+    if price is None:
+        # Diagnóstico seguro: somente indicadores estruturais, nunca conteúdo/token.
+        markers = {
+            "jsonld": bool(re.search(r'application/ld\+json', raw_html, re.I)),
+            "price_key": bool(re.search(r'(?:\\"|\")price(?:\\"|\")', decoded, re.I)),
+            "low_price_key": bool(re.search(r'lowPrice', decoded, re.I)),
+            "data_price": bool(re.search(r'data-price', decoded, re.I)),
+            "currency_brl": bool(re.search(r'BRL|R\$', decoded, re.I)),
+            "html_chars": len(raw_html),
+        }
+        _v93_log("PAGE", "Diagnóstico da página sem preço", trace=None, product_id=product_id, **markers)
         return None
 
     image = None
-    m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', html, re.I | re.S)
+    m = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', decoded, re.I | re.S)
     if m:
         image = m.group(1).strip()
 
     item_id = product_id
-    id_match = re.search(r'MLB[-_]?([0-9]{6,})', html, re.I)
+    id_match = re.search(r'MLB[-_]?([0-9]{6,})', decoded, re.I)
     if id_match:
         item_id = "MLB" + id_match.group(1)
 
+    _v93_log("PAGE", "Preço encontrado na página pública", trace=None, product_id=product_id, price=price, source=price_source)
     return {"item_id": str(item_id or ""), "name": title or fallback_title or "Produto Mercado Livre", "url": fallback_url or (f"https://www.mercadolivre.com.br/p/{product_id}" if product_id else ""), "current_price": price, "old_price": None, "discount_rate": None, "category": None, "image_url": image, "seller_id": None, "rating": None, "marketplace": "mercadolivre"}
 
 
@@ -199,6 +284,7 @@ def _oferta_fetch_public_page(title, permalink, product_id):
 
 
 def _oferta_search_public_listing(token, title, query="", rank_position=None, permalink=None, product_id=None):
+    global _OFERTA_SEARCH_BLOCKED
     if rank_position is not None:
         try:
             if int(rank_position) > 25:
@@ -206,10 +292,10 @@ def _oferta_search_public_listing(token, title, query="", rank_position=None, pe
         except Exception:
             pass
 
-    # Primeiro tentamos a busca pública somente para compatibilidade. O Render
-    # pode continuar bloqueando este endpoint; nesse caso caímos para a página.
+    # O primeiro 403 abre um circuit breaker: as próximas candidatas vão direto
+    # para a página pública, evitando dezenas de chamadas inúteis.
     search_text = (title or query or "").strip()[:120]
-    if search_text:
+    if search_text and not _OFERTA_SEARCH_BLOCKED:
         cache_key = search_text.lower()
         cached = _OFERTA_SEARCH_CACHE.get(cache_key)
         if cached and time.time() - cached[0] <= _OFERTA_SEARCH_CACHE_TTL:
@@ -217,26 +303,30 @@ def _oferta_search_public_listing(token, title, query="", rank_position=None, pe
                 return cached[1]
         try:
             _v93_log("SEARCH", "Busca pública iniciada", trace=None, query=search_text[:80])
-            response = requests.get("https://api.mercadolibre.com/sites/MLB/search", params={"q": search_text, "limit": 5}, headers={"Accept": "application/json", "User-Agent": "OFERTA-IA/10.15"}, timeout=4)
+            response = requests.get("https://api.mercadolibre.com/sites/MLB/search", params={"q": search_text, "limit": 5}, headers={"Accept": "application/json", "User-Agent": "OFERTA-IA/10.16"}, timeout=4)
             try:
                 payload = response.json()
             except Exception:
                 payload = {}
-            result = _oferta_pick_search_item(payload, source_title=title)
-            _OFERTA_SEARCH_CACHE[cache_key] = (time.time(), result)
-            if result:
-                _v93_log("SEARCH", "Publicação recuperada pela busca", trace=None, query=search_text[:80], item_id=result.get("item_id"), price=result.get("current_price"))
-                return result
-            _v93_log("SEARCH", "Busca pública sem publicação utilizável", trace=None, query=search_text[:80], http=response.status_code)
+            if response.status_code == 403:
+                _OFERTA_SEARCH_BLOCKED = True
+                _OFERTA_SEARCH_CACHE[cache_key] = (time.time(), None)
+                _v93_log("SEARCH", "Busca pública bloqueada; ativando circuit breaker", trace=None, http=403)
+            else:
+                result = _oferta_pick_search_item(payload, source_title=title)
+                _OFERTA_SEARCH_CACHE[cache_key] = (time.time(), result)
+                if result:
+                    _v93_log("SEARCH", "Publicação recuperada pela busca", trace=None, query=search_text[:80], item_id=result.get("item_id"), price=result.get("current_price"))
+                    return result
+                _v93_log("SEARCH", "Busca pública sem publicação utilizável", trace=None, query=search_text[:80], http=response.status_code)
         except Exception as exc:
             _v93_log("SEARCH", "Falha na busca pública", trace=None, query=search_text[:80], error=str(exc)[:200])
 
-    # Rota principal de recuperação quando a API de busca está bloqueada.
     return _oferta_fetch_public_page(title, permalink, product_id)
 
 
 def _oferta_catalog_to_item_strict(token, product_id, rank_position=None, query=""):
-    detail, status = _v9_fetch_json(token, f"https://api.mercadolibre.com/products/{product_id}", timeout=6, trace=None, stage="CATALOG")
+    detail, status = _v9_fetch_json(token, f"https://api.mercadolivre.com/products/{product_id}", timeout=6, trace=None, stage="CATALOG")
     if not isinstance(detail, dict):
         return None
 
