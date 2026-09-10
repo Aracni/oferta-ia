@@ -19,10 +19,10 @@ except Exception as exc:
 
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
-# PATCH V10.7 — acelera o garimpo do Mercado Livre sem recursão.
-# Guardamos a função original antes de substituí-la pelo wrapper otimizado.
-# O V10.6 substituía _v9_fetch_json e depois o próprio wrapper chamava
-# _v9_fetch_json, causando RecursionError e zerando toda a coleta.
+# PATCH V10.8 — usa o token válido também nas consultas de catálogo.
+# O V10.7 removeu o Authorization ao tentar tornar endpoints de catálogo
+# "públicos", mas o Mercado Livre está respondendo 401/403 para essas rotas.
+# Mantemos cache e timeout curto, porém enviamos o Bearer token recebido.
 _OFERTA_ORIGINAL_FETCH_JSON = _v9_fetch_json
 _OFERTA_PUBLIC_CACHE = {}
 _OFERTA_PUBLIC_CACHE_TTL = 300
@@ -49,13 +49,14 @@ def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None
         return cached[1], cached[2]
 
     try:
-        _v93_log(stage, "Consulta pública direta do catálogo", trace=trace, url=url)
+        _v93_log(stage, "Consulta de catálogo com autorização", trace=trace, url=url)
         response = requests.get(
             url,
             params=safe_params,
             headers={
+                "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
-                "User-Agent": "OFERTA-IA/10.7",
+                "User-Agent": "OFERTA-IA/10.8",
             },
             timeout=min(int(timeout or 5), 5),
         )
@@ -66,19 +67,19 @@ def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None
         status = response.status_code
         if response.ok:
             _OFERTA_PUBLIC_CACHE[cache_key] = (time.time(), data, status)
-            _v93_log(stage, "Consulta pública do catálogo OK", trace=trace, http=status)
+            _v93_log(stage, "Consulta de catálogo OK", trace=trace, http=status)
             return data, status
 
         _v93_log(
             "ERROR",
-            "Consulta pública do catálogo falhou",
+            "Consulta de catálogo falhou",
             trace=trace,
             http=status,
             error=str((data or {}).get("message") or response.text[:300])[:300],
         )
         return data, status
     except Exception as exc:
-        _v93_log("ERROR", "Falha na consulta pública do catálogo", trace=trace, error=str(exc)[:300])
+        _v93_log("ERROR", "Falha na consulta de catálogo", trace=trace, error=str(exc)[:300])
         return None, None
 
 
