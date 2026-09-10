@@ -6,7 +6,9 @@ possam evoluir sem duplicar o arquivo monolítico no repositório.
 """
 import urllib.request
 
-_SOURCE = "https://raw.githubusercontent.com/Aracni/oferta-ia/ab2bc4d94546cf4e16f5bdbf7579243ea106c880/app.py"
+# O valor anterior era um BLOB SHA, não um commit/ref do GitHub.
+# Por isso o raw.githubusercontent.com respondia 404 no Render.
+_SOURCE = "https://raw.githubusercontent.com/Aracni/oferta-ia/41a35a18c9a59a737e5bef91ef0cc1f74d3e3525/app.py"
 
 try:
     with urllib.request.urlopen(_SOURCE, timeout=20) as response:
