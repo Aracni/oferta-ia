@@ -1,0 +1,211 @@
+name: Apply OFERTA IA V10.6
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Apply V10.6 optimization
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = Path('app.py')
+          text = path.read_text(encoding='utf-8')
+          original = text
+
+          old = '''    # Categorias de fallback. O endpoint highlights só funciona onde há
+    # ranking de mais vendidos disponível; erros 404/403 são ignorados.
+    categories = [
+        "MLB432825",
+        "MLB1055",
+        "MLB1000",
+        "MLB1430",
+        "MLB1246",
+        "MLB1574",
+        "MLB1276",
+        "MLB1144",
+        "MLB1132",
+    ]
+
+    if category_id:
+        categories = [category_id]
+'''
+          new = '''    # Categorias de fallback. O endpoint highlights só funciona onde há
+    # ranking de mais vendidos disponível; erros 404/403 são ignorados.
+    # Categorias-raiz oficiais do Mercado Livre Brasil.
+    # Para um nicho informado, priorizamos sua categoria e usamos poucas
+    # categorias de fallback para não transformar o ML no gargalo da busca.
+    niche_category_hints = {
+        "eletronicos": "MLB1000",
+        "eletronico": "MLB1000",
+        "beleza": "MLB1246",
+        "casa": "MLB1574",
+        "fitness": "MLB1276",
+        "moda": "MLB1430",
+    }
+
+    categories = [
+        "MLB432825",
+        "MLB1055",
+        "MLB1000",
+        "MLB1430",
+        "MLB1246",
+        "MLB1574",
+        "MLB1276",
+        "MLB1144",
+        "MLB1132",
+    ]
+
+    if category_id:
+        categories = [category_id]
+    elif niche:
+        preferred = niche_category_hints.get(niche)
+        if preferred:
+            # Mantém alguns fallbacks: nem toda categoria-raiz possui ranking
+            # /highlights disponível.
+            categories = [preferred] + [c for c in categories if c != preferred][:3]
+'''
+          if text.count(old) != 1:
+              raise SystemExit('Bloco de categorias V10.4 não encontrado exatamente uma vez')
+          text = text.replace(old, new, 1)
+
+          old = '''    enrich_limit = min(
+        len(candidates),
+        max(limit * 5, 40) if niche else max(limit * 4, 30),
+        60,
+    )
+    selected_candidates = candidates[:enrich_limit]
+'''
+          new = '''    # V10.6: enriquecimento progressivo. Em vez de resolver até 60 candidatos
+    # de uma vez, trabalhamos em pequenos lotes e paramos quando já temos
+    # oportunidades suficientes. Isso preserva a velocidade da Shopee.
+    enrich_limit = min(
+        len(candidates),
+        max(limit * 2 + 8, 18) if niche else max(limit * 2 + 10, 24),
+        30,
+    )
+    selected_candidates = candidates[:enrich_limit]
+    target_products = min(enrich_limit, max(limit * 2, 10))
+'''
+          if text.count(old) != 1:
+              raise SystemExit('Bloco de enriquecimento V10.4 não encontrado exatamente uma vez')
+          text = text.replace(old, new, 1)
+
+          old = '''    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(resolve_candidate, c) for c in selected_candidates]
+        for future in as_completed(futures):
+            item = future.result()
+            if not item:
+                continue
+
+            if _looks_like_accessory(item.get("name", "")):
+                continue
+
+            if niche:
+                relevance = _relevance_score(
+                    niche,
+                    item.get("name", ""),
+                    item.get("category", ""),
+                )
+                if relevance < 0.5:
+                    continue
+
+            if item.get("current_price") is not None:
+                diag["with_price"] += 1
+            if item.get("url"):
+                diag["with_url"] += 1
+
+            tr = _v9_trend_rank_for_name(item.get("name", ""), trends)
+            item["trend_rank"] = tr
+
+            products.append(_v9_analyze(
+                item,
+                item.get("rank_position"),
+                tr,
+                None,
+            ))
+'''
+          new = '''    # Resolve em lotes para permitir parada antecipada.
+    # O primeiro lote tende a conter os melhores rankings; só buscamos mais
+    # candidatos se o filtro de nicho ainda não tiver produzido o suficiente.
+    batch_size = 8
+    for batch_start in range(0, len(selected_candidates), batch_size):
+        batch = selected_candidates[batch_start:batch_start + batch_size]
+        with ThreadPoolExecutor(max_workers=min(8, len(batch))) as pool:
+            futures = [pool.submit(resolve_candidate, c) for c in batch]
+            for future in as_completed(futures):
+                item = future.result()
+                if not item:
+                    continue
+
+                if _looks_like_accessory(item.get("name", "")):
+                    continue
+
+                if niche:
+                    relevance = _relevance_score(
+                        niche,
+                        item.get("name", ""),
+                        item.get("category", ""),
+                    )
+                    if relevance < 0.5:
+                        continue
+
+                if item.get("current_price") is not None:
+                    diag["with_price"] += 1
+                if item.get("url"):
+                    diag["with_url"] += 1
+
+                tr = _v9_trend_rank_for_name(item.get("name", ""), trends)
+                item["trend_rank"] = tr
+
+                products.append(_v9_analyze(
+                    item,
+                    item.get("rank_position"),
+                    tr,
+                    None,
+                ))
+
+        if len(products) >= target_products:
+            break
+'''
+          if text.count(old) != 1:
+              raise SystemExit('Bloco de resolução V10.4 não encontrado exatamente uma vez')
+          text = text.replace(old, new, 1)
+
+          old = '        "engine": "V9.8 HIGHLIGHTS",'
+          new = '        "engine": "V10.6 ML OTIMIZADO",'
+          if text.count(old) != 1:
+              raise SystemExit('Engine V9.8 não encontrado exatamente uma vez')
+          text = text.replace(old, new, 1)
+
+          compile(''.join(text), 'app.py', 'exec')
+          path.write_text(text, encoding='utf-8')
+
+          if text == original:
+              raise SystemExit('Nenhuma alteração aplicada')
+
+          subprocess.run(['git','config','user.name','github-actions[bot]'], check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git','add','app.py'], check=True)
+          subprocess.run(['git','commit','-m','Optimize Mercado Livre discovery for V10.6'], check=True)
+          subprocess.run(['git','push'], check=True)
+          PY
+
+      - name: Remove one-time workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-v10-6.yml
+          git commit -m "Remove one-time V10.6 workflow"
+          git push
