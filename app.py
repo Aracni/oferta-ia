@@ -85,12 +85,11 @@ def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None
 
 _v9_fetch_json = _oferta_fetch_json_optimized
 
-# PATCH V10.9 — resolve o vencedor do catálogo diretamente.
-# O /products/{product_id} já traz buy_box_winner com item_id e preço.
-# A implementação antiga fazia mais duas consultas (/products/.../items e
-# /items/{id}) para cada PRODUCT e acabava descartando todos os candidatos.
-# Usamos os dados oficiais do vencedor quando já estão completos; só caímos
-# para a validação do ITEM quando o vencedor não traz preço suficiente.
+# PATCH V10.10 — aproveita o buy_box_winner sem exigir permalink no payload.
+# O Mercado Livre pode retornar item_id e preço do vencedor, mas sem permalink
+# utilizável no objeto de produto. Nesse caso não devemos cair imediatamente
+# no resolver antigo, que dispara /products/{id}/items e depois /items/{id}.
+# Usamos uma URL pública determinística do item e evitamos essas chamadas extras.
 _OFERTA_ORIGINAL_CATALOG_TO_ITEM = _v9_catalog_to_item
 
 
@@ -116,13 +115,26 @@ def _oferta_catalog_to_item_resilient(token, product_id, rank_position=None, que
 
         title = detail.get("name") or winner.get("title") or "Produto Mercado Livre"
         if item_id and price and price > 0 and not _looks_like_accessory(title):
-            permalink = detail.get("permalink") or winner.get("permalink")
-            if permalink and str(permalink).startswith("http"):
+            # Preferimos o permalink oficial quando existir. Quando o catálogo
+            # não o entrega, o endereço de produto por item_id continua sendo
+            # um link público válido e evita a consulta adicional ao /items.
+            permalink = winner.get("permalink") or detail.get("permalink")
+            if not permalink:
+                permalink = f"https://produto.mercadolivre.com.br/{item_id}"
+            if str(permalink).startswith("http"):
                 old = winner.get("original_price")
+                if old in (None, ""):
+                    old = detail.get("original_price")
                 try:
                     old = float(old) if old not in (None, "") else None
                 except Exception:
                     old = None
+                pictures = detail.get("pictures")
+                image_url = None
+                if isinstance(pictures, list) and pictures:
+                    first = pictures[0]
+                    if isinstance(first, dict):
+                        image_url = first.get("secure_url") or first.get("url")
                 item = {
                     "item_id": str(item_id),
                     "name": title,
@@ -131,7 +143,7 @@ def _oferta_catalog_to_item_resilient(token, product_id, rank_position=None, que
                     "old_price": old,
                     "discount_rate": round((old - price) / old * 100, 2) if old and old > price else None,
                     "category": winner.get("category_id") or detail.get("domain_id"),
-                    "image_url": (detail.get("pictures") or [{}])[0].get("url") if isinstance(detail.get("pictures"), list) and detail.get("pictures") else None,
+                    "image_url": image_url,
                     "seller_id": winner.get("seller_id"),
                     "rating": None,
                     "marketplace": "mercadolivre",
@@ -139,10 +151,6 @@ def _oferta_catalog_to_item_resilient(token, product_id, rank_position=None, que
                     "discovery_query": query,
                     "catalog_product_id": product_id,
                 }
-                if not item["image_url"] and isinstance(detail.get("pictures"), list) and detail.get("pictures"):
-                    first = detail["pictures"][0]
-                    if isinstance(first, dict):
-                        item["image_url"] = first.get("secure_url") or first.get("url")
                 return item
 
     # Fallback somente quando o detalhe do produto não trouxe um vencedor útil.
