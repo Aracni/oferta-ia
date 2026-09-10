@@ -11,13 +11,13 @@ if os.environ.get("PORT"):
         import v106_patch as _v106
         _v106.install(_oferta_app)
 
-        # O módulo meli_auto precisa acessar as funções internas de persistência
-        # do app.py sem duplicá-las nem expor credenciais.
-        _oferta_app._get_connection = _oferta_app._get_connection
-        _oferta_app._save_connection = _oferta_app._save_connection
+        # Disponibiliza ao patch automático somente os helpers internos de
+        # persistência já existentes no app.py. Nenhum segredo é exposto.
+        _oferta_app.app._get_connection = _oferta_app._get_connection
+        _oferta_app.app._save_connection = _oferta_app._save_connection
 
         import meli_auto as _meli_auto
-        _meli_auto.install(_oferta_app)
+        _meli_auto.install(_oferta_app.app)
         print("[SITE] OFERTA IA V10.8 + Mercado Livre automático ativados", flush=True)
     except Exception as exc:
         print(
