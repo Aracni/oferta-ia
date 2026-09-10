@@ -158,7 +158,7 @@ const channels=()=>[...document.querySelectorAll('#channelOptions input:checked'
 function toggle(id,on){$(id).classList.toggle('hidden',!on);if(on)$(id).scrollIntoView({behavior:'smooth',block:'start'})}
 function loading(el,text){el.innerHTML='<div class="loading"><span class="spinner"></span>'+esc(text)+'</div>'}
 function productCard(p,i,mode){const img=p.image_url?`<img class="thumb" src="${esc(p.image_url)}" alt="" loading="lazy">`:'<div class="thumb"></div>';const score=p.relevance_score!=null?`<span class="badge blue-b">Relevância ${Math.round(Number(p.relevance_score)*100)}%</span>`:'';const save=mode==='products'?`<button class="action" style="background:#ecfdf3;color:#027a48" onclick="addProduct(${i})">➕ Salvar</button>`:'';return `<article class="card product-card">${img}<div><div class="title">${esc(p.name)}</div><div class="store">${esc(p.store||'Mercado Livre')} ${p.category?'· '+esc(p.category):''}</div>${p.current_price!=null?`<div class="price">${money(p.current_price)}</div>`:''}${p.old_price?`<div class="old">de ${money(p.old_price)}</div>`:''}<div class="score-row">${score}<span class="badge orange-b">${esc(p.data_confidence||'catálogo')}</span></div><div class="actions">${p.url?`<a class="action dark" href="${esc(p.url)}" target="_blank" rel="noopener">🛒 Ver produto</a>`:''}${save}</div></div></article>`}
-function opportunityCard(p,i){const s=Number(p.opportunity_score||0);const label=s>=90?'🟢 EXCEPCIONAL':s>=80?'🟢 EXCELENTE':s>=70?'🟡 BOA':s>=60?'🟠 MODERADA':'🔴 DESCARTAR';const conf=esc(p.data_confidence||'dados parciais');const comm=p.commission_value!=null?money(p.commission_value):'—';const breakdown=p.score_breakdown||{};return `<article class="card op-card"><div class="score-row"><span class="badge">🔥 ${s.toFixed(2)}/100 · ${label}</span><span class="badge blue-b">Confiança: ${conf}</span></div><div style="margin-top:9px" class="title">${esc(p.name)}</div><div class="store">${esc(p.store||p.marketplace||'Marketplace')} · ${esc((p.marketplace||'').toUpperCase())}</div>${p.image_url?`<img class="thumb" style="width:100%;height:190px;margin-top:10px;object-fit:contain" src="${esc(p.image_url)}" alt="" loading="lazy">`:''}<div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old">de ${money(p.old_price)}</div>`:''}<div class="metrics"><div class="metric">Comissão<b>${p.commission_rate!=null?Number(p.commission_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Por venda<b>${comm}</b></div><div class="metric">Vendas<b>${p.sales!=null?Number(p.sales).toLocaleString('pt-BR'):'—'}</b></div><div class="metric">Desconto<b>${p.discount_rate!=null?Number(p.discount_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Avaliação<b>${p.rating?Number(p.rating).toFixed(1):'—'}</b></div><div class="metric">Concorrência<b>${p.competition_estimated?'~ ':''}${p.competition_index!=null?Number(p.competition_index).toFixed(0):'—'}</b></div></div><details style="margin-top:10px"><summary>Ver composição do Score</summary><div class="metrics" style="margin-top:8px">${Object.entries(breakdown).map(([k,v])=>`<div class="metric">${esc(k)}<b>${Number(v).toFixed(1)}</b></div>`).join('')}</div>${p.competition_estimated?'<div class="muted" style="margin-top:8px">ℹ️ Concorrência é estimada: a API não informa quantidade de afiliados concorrentes.</div>':''}</details><div class="actions"><a class="action dark" href="${esc(p.url||'#')}" target="_blank" rel="noopener">🛒 Ver produto</a><button class="action" style="background:#ecfdf3;color:#027a48" onclick="approveOpportunity(${i})">✅ Aprovar</button></div><button class="action" style="width:100%;margin-top:8px;background:#f2f4f7" onclick="this.closest('article').remove()">Descartar</button></article>`}
+function opportunityCard(p,i){const s=Number(p.opportunity_score||0);const label=s>=90?'🟢 EXCEPCIONAL':s>=80?'🟢 EXCELENTE':s>=70?'🟡 BOA':s>=60?'🟠 MODERADA':'🔴 DESCARTAR';const conf=esc(p.data_confidence||'dados parciais');const scoreStatus=esc(p.score_status||'provisório');const comm=p.commission_value!=null?money(p.commission_value):'—';const breakdown=p.score_breakdown||{};return `<article class="card op-card"><div class="score-row"><span class="badge">🔥 ${s.toFixed(2)}/100 · ${label}</span><span class="badge blue-b">Confiança: ${conf}</span><span class="badge orange-b">Score ${scoreStatus}</span></div><div style="margin-top:9px" class="title">${esc(p.name)}</div><div class="store">${esc(p.store||p.marketplace||'Marketplace')} · ${esc((p.marketplace||'').toUpperCase())}</div>${p.image_url?`<img class="thumb" style="width:100%;height:190px;margin-top:10px;object-fit:contain" src="${esc(p.image_url)}" alt="" loading="lazy">`:''}<div class="price">${money(p.current_price)}</div>${p.old_price?`<div class="old">de ${money(p.old_price)}</div>`:''}<div class="metrics"><div class="metric">Comissão<b>${p.commission_rate!=null?Number(p.commission_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Por venda<b>${comm}</b></div><div class="metric">Vendas<b>${p.sales!=null?Number(p.sales).toLocaleString('pt-BR'):'—'}</b></div><div class="metric">Desconto<b>${p.discount_rate!=null?Number(p.discount_rate).toFixed(1).replace('.',',')+'%':'—'}</b></div><div class="metric">Avaliação<b>${p.rating?Number(p.rating).toFixed(1):'—'}</b></div><div class="metric">Pressão competitiva<b>${p.competition_index!=null?(p.competition_estimated?'~ ':'')+Number(p.competition_index).toFixed(0)+'/100':'Não disponível'}</b></div></div><details style="margin-top:10px"><summary>Ver composição do Score</summary><div class="metrics" style="margin-top:8px">${Object.entries(breakdown).map(([k,v])=>`<div class="metric">${esc(k)}<b>${Number(v).toFixed(1)}</b></div>`).join('')}</div>${p.competition_estimated?'<div class="muted" style="margin-top:8px">ℹ️ Pressão competitiva estimada: combina vendas, comissão e ranking. Não representa a quantidade de afiliados.</div>':''}${p.score_status==='provisório'?'<div class="muted" style="margin-top:8px">ℹ️ Score provisório: faltam sinais de concorrência e/ou tendência para validar 100% da oportunidade.</div>':''}</details><div class="actions"><a class="action dark" href="${esc(p.url||'#')}" target="_blank" rel="noopener">🛒 Ver produto</a><button class="action" style="background:#ecfdf3;color:#027a48" onclick="approveOpportunity(${i})">✅ Aprovar</button></div><button class="action" style="width:100%;margin-top:8px;background:#f2f4f7" onclick="this.closest('article').remove()">Descartar</button></article>`}
 async function jsonFetch(url,opts={}){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail||'Erro inesperado.');return d}
 async function loadDashboard(){try{const p=await jsonFetch('/api/products');$('products').textContent=(p||[]).length;const s=await jsonFetch('/api/integrations/status');const ok=!!s.mercadolivre?.connected;$('connectedStatus').textContent=ok?'OK':'—';$('meliStatus').textContent=ok?'🟢 Mercado Livre conectado.':'🟡 Mercado Livre não conectado.';$('amazonStatus').textContent=s.amazon?.tag?'🟢 Identificação salva: '+s.amazon.tag:'Nenhuma identificação salva.';$('amazonTag').value=s.amazon?.tag||''}catch(e){}}
 async function loadOffersCount(){try{const d=await jsonFetch('/api/dashboard');$('offers').textContent=d.offers??0}catch(e){}}
@@ -1080,7 +1080,7 @@ def _shopee_credentials_ready():
 
 def _shopee_request(query, variables=None, timeout=20):
     if not _shopee_credentials_ready():
-        raise RuntimeError("Configure SHOOPEE_APP_ID e SHOOPEE_APP_SECRET no Render.")
+        raise RuntimeError("Configure SHOPEE_APP_ID e SHOOPEE_APP_SECRET no Render.")
     payload = {
         "query": query,
         "operationName": "ProductOffers",
@@ -1095,7 +1095,7 @@ def _shopee_request(query, variables=None, timeout=20):
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Authorization": f"SHA256 Credential={SHOPEE_APP_ID},Timestamp={timestamp},Signature={signature}",
-        "User-Agent": "OFERTA-IA/10.0",
+        "User-Agent": "OFERTA-IA/10.3",
     }
     response = requests.post(SHOPEE_GRAPHQL_URL, data=body.encode("utf-8"), headers=headers, timeout=timeout)
     try:
@@ -1199,6 +1199,44 @@ def _shopee_potential_score(demand, commission, discount, price, rating, trend):
     return round(demand*.30 + commission*.20 + discount*.15 + price*.10 + rating*.10 + trend*.15, 2)
 
 
+def _shopee_competitive_pressure(sales, commission_rate, rank_position=None):
+    """
+    Estima PRESSÃO COMPETITIVA (0-100), não quantidade de afiliados.
+    Usa somente sinais disponíveis na API: vendas, comissão e ranking.
+    """
+    try:
+        s = max(0.0, float(sales or 0))
+    except Exception:
+        s = 0.0
+    try:
+        c = max(0.0, float(commission_rate or 0))
+    except Exception:
+        c = 0.0
+
+    # Escala logarítmica: ~1k vendas=60, ~10k=80, ~100k=100.
+    sales_pressure = min(100.0, (math.log10(s + 1) / 5.0) * 100.0)
+
+    # Comissão maior tende a aumentar o interesse de afiliados.
+    commission_pressure = min(100.0, (c / 30.0) * 100.0)
+
+    # Posição alta no ranking aumenta a visibilidade.
+    if rank_position is None:
+        rank_pressure = 50.0
+    else:
+        try:
+            r = max(1, int(rank_position))
+            rank_pressure = max(0.0, 100.0 - (r - 1) * 4.0)
+        except Exception:
+            rank_pressure = 50.0
+
+    pressure = (
+        sales_pressure * 0.65
+        + commission_pressure * 0.20
+        + rank_pressure * 0.15
+    )
+    return round(max(0.0, min(100.0, pressure)), 2)
+
+
 def _shopee_analyze(node, rank_position=None, query=""):
     name = (node.get("productName") or "").strip()
     if not name:
@@ -1213,12 +1251,14 @@ def _shopee_analyze(node, rank_position=None, query=""):
     if commission_value is None and cur is not None and commission_rate is not None:
         commission_value = cur * commission_rate / 100
 
-    # A API não informa quantos afiliados disputam aquele produto.
-    # Logo, não inventamos concorrência: usamos 50 como ponto neutro estimado.
-    competition_index = 50.0
+    # A API Affiliate atual não fornece a quantidade real de afiliados.
+    # Não inventamos esse número. Estimamos PRESSÃO COMPETITIVA (0-100)
+    # usando apenas sinais reais disponíveis: vendas, comissão e ranking.
+    competition_index = _shopee_competitive_pressure(sales, commission_rate, rank_position)
+    competition_estimated = True
+    low_competition = 100.0 - competition_index
     demand = _shopee_demand_score(sales)
     commission = _shopee_commission_score(commission_rate)
-    low_competition = 100 - competition_index
     discount_score = _shopee_discount_score(discount)
     price_score = _shopee_price_score(cur)
     rating_score = _shopee_rating_score(rating)
@@ -1230,6 +1270,7 @@ def _shopee_analyze(node, rank_position=None, query=""):
         trend_score*.05 + potential*.05, 2
     )
     data_confidence = "média" if commission_rate is not None and cur is not None else "baixa"
+    score_status = "provisório" if competition_index is None or trend_score == 50.0 else "validado"
     return {
         "name": name,
         "store": node.get("shopName") or "Shopee",
@@ -1250,11 +1291,15 @@ def _shopee_analyze(node, rank_position=None, query=""):
         "shopee_commission_rate": _shopee_rate_percent(node.get("shopeeCommissionRate")),
         "commission_value": commission_value,
         "competition_index": competition_index,
-        "competition_estimated": True,
+        "competition_estimated": competition_estimated,
+        "competition_method": "pressao_estimada_por_vendas_comissao_ranking",
+        "competition_note": "Não é quantidade de afiliados. É uma estimativa de pressão competitiva baseada em sinais disponíveis na API.",
+        "affiliate_count": None,
         "data_confidence": data_confidence,
         "rank_position": rank_position,
         "discovery_query": query,
         "opportunity_score": score,
+        "score_status": score_status,
         "opportunity_label": _v9_classification(score)[0],
         "score_breakdown": {
             "demanda": round(demand,2), "comissao": round(commission,2),
@@ -1302,7 +1347,7 @@ def shopee_opportunities(payload: dict):
     try:
         items = _shopee_search_products(niche or None, min(50, max(limit * 2, 20)))
         selected = items[:limit]
-        return {"status":"ok", "engine":"OFERTA IA V10.1", "marketplace":"shopee", "items":selected, "opportunities":selected, "returned":len(selected), "candidates_found":len(items), "message":f"Shopee: {len(selected)} oportunidade(s) analisada(s)."}
+        return {"status":"ok", "engine":"OFERTA IA V10.3", "marketplace":"shopee", "items":selected, "opportunities":selected, "returned":len(selected), "candidates_found":len(items), "message":f"Shopee: {len(selected)} oportunidade(s) analisada(s)."}
     except Exception as exc:
         _v93_log("SHOPEE", "Garimpo falhou", error=str(exc)[:300])
         raise HTTPException(502, f"Falha na API da Shopee: {str(exc)[:500]}")
@@ -1310,38 +1355,47 @@ def shopee_opportunities(payload: dict):
 
 @app.post("/api/opportunities-central")
 def opportunities_central(payload: dict):
-    """Motor central V10: Shopee é um provider; ML continua independente."""
+    """Motor central V10.2: providers rodam em paralelo e falham de forma isolada."""
     niche = (payload.get("niche") or "").strip()
     limit = max(5, min(20, int(payload.get("limit") or 10)))
     all_items = []
     diagnostics = []
 
-    if _shopee_credentials_ready():
-        try:
-            shopee_items = _shopee_search_products(niche or None, min(50, max(limit * 2, 20)))
-            all_items.extend(shopee_items)
-            diagnostics.append(f"Shopee: {len(shopee_items)} candidatos")
-        except Exception as exc:
-            diagnostics.append(f"Shopee indisponível: {str(exc)[:180]}")
-    else:
-        diagnostics.append("Shopee não configurada")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # ML entra somente se houver token válido, sem deixar uma falha do ML derrubar a Shopee.
-    try:
-        token = _v9_valid_meli_token()
-        if token:
+    def run_shopee():
+        if not _shopee_credentials_ready():
+            return [], "Shopee não configurada"
+        try:
+            items = _shopee_search_products(niche or None, min(50, max(limit * 2, 20)))
+            return items, f"Shopee: {len(items)} candidatos"
+        except Exception as exc:
+            return [], f"Shopee indisponível: {str(exc)[:180]}"
+
+    def run_meli():
+        try:
+            token = _v9_valid_meli_token()
+            if not token:
+                return [], "Mercado Livre sem token válido"
             try:
-                ml_payload = {"niche": niche, "limit": limit}
-                ml = mercadolivre_opportunities(ml_payload)
-                ml_items = ml.get("items") or ml.get("opportunities") or []
-                all_items.extend(ml_items)
-                diagnostics.append(f"Mercado Livre: {len(ml_items)} candidatos")
+                ml = mercadolivre_opportunities({"niche": niche, "limit": limit})
+                items = ml.get("items") or ml.get("opportunities") or []
+                return items, f"Mercado Livre: {len(items)} candidatos"
             except Exception as exc:
-                diagnostics.append(f"Mercado Livre indisponível: {str(exc)[:180]}")
-        else:
-            diagnostics.append("Mercado Livre sem token válido")
-    except Exception as exc:
-        diagnostics.append(f"Mercado Livre não consultado: {str(exc)[:180]}")
+                return [], f"Mercado Livre indisponível: {str(exc)[:180]}"
+        except Exception as exc:
+            return [], f"Mercado Livre não consultado: {str(exc)[:180]}"
+
+    started = time.time()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {pool.submit(run_shopee): "shopee", pool.submit(run_meli): "mercadolivre"}
+        for future in as_completed(futures):
+            try:
+                items, message = future.result()
+                all_items.extend(items)
+                diagnostics.append(message)
+            except Exception as exc:
+                diagnostics.append(f"{futures[future]} falhou: {str(exc)[:180]}")
 
     unique = {}
     for item in all_items:
@@ -1350,16 +1404,15 @@ def opportunities_central(payload: dict):
             unique[key] = item
     ranked = sorted(unique.values(), key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
     selected = ranked[:limit]
-    # O motor central nunca publica automaticamente: ele apenas ranqueia e apresenta candidatos.
-    # Mantemos a concorrência estimada explicitamente marcada quando o provider não entrega esse dado.
     for item in selected:
         if item.get("competition_estimated"):
-            item["competition_note"] = "Estimativa: a fonte não informa concorrência de afiliados."
+            item["competition_note"] = "Pressão competitiva estimada por vendas, comissão e ranking; não é quantidade de afiliados."
+    elapsed_ms = round((time.time() - started) * 1000)
     return {
-        "status":"ok", "engine":"OFERTA IA V10.1", "mode":"central",
+        "status":"ok", "engine":"OFERTA IA V10.2", "mode":"central",
         "niche":niche or "todos", "items":selected, "opportunities":selected,
         "returned":len(selected), "candidates_found":len(ranked),
-        "diagnostic":diagnostics,
+        "diagnostic":diagnostics, "elapsed_ms":elapsed_ms,
         "message":" · ".join(diagnostics) if diagnostics else "Garimpo concluído."
     }
 
