@@ -1037,105 +1037,417 @@ def _product_from_catalog(token, catalog_item, rank_position=None, query=''):
 
 @app.post('/api/mercadolivre/opportunities')
 def mercadolivre_opportunities(payload: dict):
-    """Descoberta rápida: coleta rankings em paralelo e aprofunda apenas os melhores candidatos."""
-    token = (_get_connection('mercadolivre') or {}).get('access_token')
+    """
+    V9.7 — descoberta baseada no recurso oficial /highlights.
+
+    O endpoint /sites/MLB/search estava retornando HTTP 403 para esta
+    aplicação. Portanto, o garimpo de oportunidades NÃO usa mais esse
+    endpoint. A fonte primária passa a ser /highlights/MLB/category/*,
+    que entrega os mais vendidos por categoria, e cada candidato é
+    convertido para um ITEM real antes da análise.
+
+    Tipos suportados pelo highlights:
+      ITEM         -> valida diretamente em /items/{id}
+      PRODUCT      -> resolve catálogo e depois uma publicação real
+      USER_PRODUCT -> consulta o UP e encontra suas publicações
+    """
+    global _V93_LAST_DIAGNOSTIC, _V94_LOG_BUFFER
+    _V94_LOG_BUFFER = []
+    trace = uuid.uuid4().hex[:8]
+    started = time.time()
+
+    diag = {
+        "trace_id": trace,
+        "engine": "V9.7 HIGHLIGHTS",
+        "token_valid": False,
+        "trends_requests": 0,
+        "trend_terms": 0,
+        "highlight_requests": 0,
+        "highlight_ok": 0,
+        "highlight_errors": 0,
+        "highlight_candidates": 0,
+        "raw_candidates": 0,
+        "filtered_candidates": 0,
+        "item_requests": 0,
+        "item_active": 0,
+        "with_price": 0,
+        "with_url": 0,
+        "validated_products": 0,
+        "final": 0,
+        "errors": [],
+    }
+
+    def err(stage, message, **fields):
+        if len(diag["errors"]) < 30:
+            diag["errors"].append({"stage": stage, "message": message, **fields})
+        _v93_log(stage, message, trace=trace, **fields)
+
+    _v93_log("START", "Início do garimpo V9.7", trace=trace)
+
+    token = _v9_valid_meli_token()
     if not token:
-        raise HTTPException(401, 'Mercado Livre não está conectado.')
-    niche = _canonical_query((payload.get('niche') or '').strip())
+        err("AUTH", "Não foi possível obter token válido")
+        diag["elapsed_ms"] = round((time.time() - started) * 1000)
+        _V93_LAST_DIAGNOSTIC = diag
+        raise HTTPException(401, "Mercado Livre sem sessão válida. Conecte novamente o Mercado Livre.")
+
+    diag["token_valid"] = True
+    _v93_log("AUTH", "Token válido", trace=trace)
+
+    niche = _canonical_query((payload.get("niche") or "").strip())
     try:
-        limit = max(5, min(20, int(payload.get('limit') or 10)))
+        limit = max(5, min(20, int(payload.get("limit") or payload.get("quantity") or 10)))
     except Exception:
         limit = 10
 
-    cache_key = f"opp:{niche}:{limit}"
-    cached = _cache_get(cache_key)
-    if cached:
-        return {**cached, 'cached': True}
+    category_id = (payload.get("category_id") or "").strip() or None
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    categories = ['MLB1000','MLB1055','MLB1246','MLB1430','MLB1574','MLB1276','MLB1144','MLB1132']
+    # Tendências continuam sendo usadas como sinal complementar.
+    trends = []
+    try:
+        diag["trends_requests"] += 1
+        trends = _v9_trends(token, None, trace=trace) or []
+        diag["trend_terms"] = len(trends)
+        _v93_log("TRENDS", "Tendências carregadas", trace=trace, terms=len(trends))
+    except Exception as exc:
+        err("TRENDS", "Falha ao carregar tendências", error=type(exc).__name__)
+
+    # Categorias de fallback. O endpoint highlights só funciona onde há
+    # ranking de mais vendidos disponível; erros 404/403 são ignorados.
+    categories = [
+        "MLB432825",
+        "MLB1055",
+        "MLB1000",
+        "MLB1430",
+        "MLB1246",
+        "MLB1574",
+        "MLB1276",
+        "MLB1144",
+        "MLB1132",
+    ]
+
+    if category_id:
+        categories = [category_id]
+
     candidates = []
     seen = set()
 
     def fetch_highlight(cat):
-        return cat, _meli_get(token, f'https://api.mercadolibre.com/highlights/MLB/category/{cat}', timeout=8)[0]
+        data, status = _v9_fetch_json(
+            token,
+            f"https://api.mercadolibre.com/highlights/MLB/category/{cat}",
+            timeout=10,
+            trace=trace,
+            stage="HIGHLIGHTS",
+        )
+        return cat, data, status
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=min(9, len(categories))) as pool:
         futures = [pool.submit(fetch_highlight, cat) for cat in categories]
-        for f in as_completed(futures):
+        for future in as_completed(futures):
             try:
-                cat, data = f.result()
-                for x in (data or {}).get('content') or []:
-                    if x.get('type') not in ('PRODUCT','ITEM','USER_PRODUCT'):
-                        continue
-                    pid = x.get('id')
-                    if pid and pid not in seen:
-                        seen.add(pid)
-                        candidates.append(({'id': pid}, x.get('position'), cat))
-            except Exception:
-                pass
+                cat, data, status = future.result()
+                diag["highlight_requests"] += 1
 
-    # Nicho é opcional. Quando informado, usamos poucas buscas de catálogo em paralelo.
-    if niche:
-        queries = [niche]
-        try:
-            words = _tokens(niche)
-            if len(words) > 1:
-                queries += words[:2]
-        except Exception:
-            pass
-        def search_catalog(q):
-            try:
-                data, _ = _meli_get(token, 'https://api.mercadolibre.com/products/search',
-                                    {'status':'active','site_id':'MLB','q':q,'limit':15}, timeout=8)
-                return q, (data or {}).get('results') or []
-            except Exception:
-                return q, []
-        with ThreadPoolExecutor(max_workers=min(3, len(queries))) as pool:
-            for q, rows in pool.map(search_catalog, list(dict.fromkeys(queries))):
-                for x in rows:
-                    pid = x.get('id')
-                    title = x.get('name') or x.get('title') or ''
-                    if pid and pid not in seen and not _looks_like_accessory(title) and _relevance_score(niche, title, x.get('domain_id','')) >= 0.5:
-                        seen.add(pid)
-                        candidates.append((x, None, q))
+                if not isinstance(data, dict):
+                    diag["highlight_errors"] += 1
+                    err("HIGHLIGHTS", "Categoria sem resposta utilizável", category=cat, http=status)
+                    continue
+
+                content = data.get("content") or []
+                if not isinstance(content, list):
+                    content = []
+
+                diag["highlight_ok"] += 1
+                diag["highlight_candidates"] += len(content)
+
+                for row in content:
+                    if not isinstance(row, dict):
+                        continue
+
+                    pid = row.get("id")
+                    typ = str(row.get("type") or "").upper()
+                    pos = row.get("position")
+
+                    if not pid or typ not in {"ITEM", "PRODUCT", "USER_PRODUCT"}:
+                        continue
+
+                    key = f"{typ}:{pid}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    candidates.append({
+                        "id": str(pid),
+                        "type": typ,
+                        "rank_position": pos,
+                        "category_id": cat,
+                    })
+
+            except Exception as exc:
+                diag["highlight_errors"] += 1
+                err("HIGHLIGHTS", "Exceção ao consultar ranking", error=type(exc).__name__)
+
+    diag["raw_candidates"] = len(candidates)
+
+    # Ranking melhor posicionado vem primeiro.
+    candidates.sort(
+        key=lambda x: (
+            999 if x.get("rank_position") is None else int(x.get("rank_position")),
+            x.get("type") or "",
+        )
+    )
+
+    _v93_log(
+        "HIGHLIGHTS",
+        "Rankings coletados",
+        trace=trace,
+        requests=diag["highlight_requests"],
+        ok=diag["highlight_ok"],
+        errors=diag["highlight_errors"],
+        candidates=len(candidates),
+    )
 
     if not candidates:
-        return {'mode':'opportunities','niche':niche or 'todos','items':[],'returned':0,'message':'Nenhum candidato foi retornado pelo Mercado Livre agora.','cached':False}
+        diag["elapsed_ms"] = round((time.time() - started) * 1000)
+        _V93_LAST_DIAGNOSTIC = diag
+        _v93_log("END", "Nenhum candidato retornado pelos rankings", trace=trace, final=0, elapsed_ms=diag["elapsed_ms"])
+        return {
+            "status": "ok",
+            "engine": "OFERTA IA V9.7",
+            "mode": "opportunities",
+            "niche": niche or "todos",
+            "items": [],
+            "opportunities": [],
+            "returned": 0,
+            "candidates_found": 0,
+            "validated": 0,
+            "diagnostic": diag,
+            "message": f"Nenhum ranking de mais vendidos disponível agora. Rastreamento {trace}.",
+            "cached": False,
+        }
 
-    # A posição do ranking é suficiente para selecionar os candidatos antes do enriquecimento.
-    candidates.sort(key=lambda x: (999 if x[1] is None else int(x[1])))
-    enrich_limit = min(len(candidates), max(limit * 2, 16), 28)
+    # Para nicho informado, mantemos candidatos suficientes para filtrar
+    # pelo título depois que o item real for resolvido.
+    enrich_limit = min(
+        len(candidates),
+        max(limit * 5, 40) if niche else max(limit * 4, 30),
+        60,
+    )
     selected_candidates = candidates[:enrich_limit]
-    products = []
 
-    def enrich(row):
-        x, pos, q = row
-        return _product_from_catalog(token, x, pos, q)
+    products = []
+    errors_counter = Counter()
+
+    def resolve_candidate(candidate):
+        cid = candidate["id"]
+        typ = candidate["type"]
+        pos = candidate.get("rank_position")
+        cat = candidate.get("category_id")
+
+        try:
+            if typ == "ITEM":
+                diag["item_requests"] += 1
+                item = _v9_get_item(token, cid)
+                if not item:
+                    errors_counter["item_invalid"] += 1
+                    return None
+                item["rank_position"] = pos
+                item["discovery_query"] = f"highlight:{cat}"
+                item["highlight_type"] = typ
+                return item
+
+            if typ == "PRODUCT":
+                item = _v9_catalog_to_item(token, cid, pos, f"highlight:{cat}")
+                if item:
+                    item["highlight_type"] = typ
+                else:
+                    errors_counter["product_unresolved"] += 1
+                return item
+
+            if typ == "USER_PRODUCT":
+                # Primeiro obtemos os dados do User Product para descobrir
+                # o seller_id e então suas publicações reais.
+                up, status = _v9_fetch_json(
+                    token,
+                    f"https://api.mercadolibre.com/user-products/{cid}",
+                    timeout=10,
+                    trace=trace,
+                    stage="USER_PRODUCT",
+                )
+                if not isinstance(up, dict):
+                    errors_counter["user_product_unresolved"] += 1
+                    return None
+
+                seller_id = up.get("user_id")
+                if not seller_id:
+                    errors_counter["user_product_without_seller"] += 1
+                    return None
+
+                items_data, _ = _v9_fetch_json(
+                    token,
+                    f"https://api.mercadolibre.com/users/{seller_id}/items/search",
+                    {"user_product_id": cid, "limit": 20},
+                    timeout=10,
+                    trace=trace,
+                    stage="USER_PRODUCT",
+                )
+
+                item_ids = []
+                if isinstance(items_data, dict):
+                    item_ids = items_data.get("results") or []
+
+                # O ranking já indica demanda; entre as publicações do UP,
+                # escolhemos a primeira que estiver ativa e tiver preço/link.
+                for item_id in item_ids[:10]:
+                    if not item_id:
+                        continue
+                    diag["item_requests"] += 1
+                    item = _v9_get_item(token, str(item_id))
+                    if not item:
+                        continue
+                    item["rank_position"] = pos
+                    item["discovery_query"] = f"highlight:{cat}"
+                    item["user_product_id"] = cid
+                    item["highlight_type"] = typ
+                    item["category"] = item.get("category") or up.get("domain_id")
+                    return item
+
+                errors_counter["user_product_no_active_item"] += 1
+                return None
+
+            errors_counter["unsupported_type"] += 1
+            return None
+
+        except Exception as exc:
+            errors_counter[type(exc).__name__] += 1
+            return None
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(enrich, row) for row in selected_candidates]
-        for f in as_completed(futures):
-            try:
-                p = f.result()
-                if p and not _looks_like_accessory(p.get('name','')):
-                    if niche and _relevance_score(niche, p.get('name',''), p.get('category','')) < 0.5:
-                        continue
-                    products.append(p)
-            except Exception:
-                pass
+        futures = [pool.submit(resolve_candidate, c) for c in selected_candidates]
+        for future in as_completed(futures):
+            item = future.result()
+            if not item:
+                continue
 
-    uniq = {}
-    for p in products:
-        key = p.get('item_id') or p.get('product_id') or p.get('catalog_product_id') or p.get('name')
-        if key and (key not in uniq or float(p.get('opportunity_score') or 0) > float(uniq[key].get('opportunity_score') or 0)):
-            uniq[key] = p
-    products = list(uniq.values())
-    products.sort(key=lambda p: (-float(p.get('opportunity_score') or 0), float(p.get('rank_position') or 999), -float(p.get('discount_rate') or 0)))
+            if _looks_like_accessory(item.get("name", "")):
+                continue
+
+            if niche:
+                relevance = _relevance_score(
+                    niche,
+                    item.get("name", ""),
+                    item.get("category", ""),
+                )
+                if relevance < 0.5:
+                    continue
+
+            if item.get("current_price") is not None:
+                diag["with_price"] += 1
+            if item.get("url"):
+                diag["with_url"] += 1
+
+            tr = _v9_trend_rank_for_name(item.get("name", ""), trends)
+            item["trend_rank"] = tr
+
+            products.append(_v9_analyze(
+                item,
+                item.get("rank_position"),
+                tr,
+                None,
+            ))
+
+    diag["filtered_candidates"] = len(products)
+    diag["validated_products"] = len(products)
+
+    for k, v in errors_counter.items():
+        diag["errors"].append({
+            "stage": "RESOLVE",
+            "message": "Candidato não resolvido",
+            "error": k,
+            "count": v,
+        })
+
+    _v93_log(
+        "VALIDATE",
+        "Candidatos resolvidos",
+        trace=trace,
+        requested=len(selected_candidates),
+        active=diag["item_active"],
+        price=diag["with_price"],
+        url=diag["with_url"],
+        valid=len(products),
+        errors=sum(errors_counter.values()),
+    )
+
+    # Deduplicação final.
+    unique = {}
+    for product in products:
+        key = (
+            product.get("item_id")
+            or product.get("catalog_product_id")
+            or product.get("user_product_id")
+            or product.get("name")
+        )
+        if not key:
+            continue
+        if (
+            key not in unique
+            or float(product.get("opportunity_score") or 0)
+            > float(unique[key].get("opportunity_score") or 0)
+        ):
+            unique[key] = product
+
+    products = list(unique.values())
+
+    products.sort(
+        key=lambda p: (
+            -float(p.get("opportunity_score") or 0),
+            999 if p.get("rank_position") is None else int(p.get("rank_position")),
+            float(p.get("current_price") or 10**12),
+        )
+    )
+
     selected = products[:limit]
-    result = {'mode':'opportunities','niche':niche or 'todos','items':selected,'returned':len(selected),
-              'message':f'{len(selected)} oportunidade(s) encontrada(s) após analisar {len(selected_candidates)} candidatos.','cached':False}
-    return _cache_set(cache_key, result)
+
+    diag["final"] = len(selected)
+    diag["elapsed_ms"] = round((time.time() - started) * 1000)
+    _V93_LAST_DIAGNOSTIC = diag
+
+    _v93_log(
+        "END",
+        "Garimpo V9.7 encerrado",
+        trace=trace,
+        final=len(selected),
+        candidates=len(candidates),
+        elapsed_ms=diag["elapsed_ms"],
+    )
+
+    if selected:
+        message = (
+            f"{len(selected)} oportunidade(s) encontrada(s) usando rankings "
+            f"de mais vendidos. Rastreamento {trace}."
+        )
+    else:
+        message = (
+            f"Os rankings responderam, mas nenhum candidato passou pela "
+            f"validação/filtro. Rastreamento {trace}."
+        )
+
+    return {
+        "status": "ok",
+        "engine": "OFERTA IA V9.7",
+        "mode": "opportunities",
+        "niche": niche or "todos",
+        "items": selected,
+        "opportunities": selected,
+        "returned": len(selected),
+        "candidates_found": len(candidates),
+        "validated": len(products),
+        "diagnostic": diag,
+        "message": message,
+        "cached": False,
+    }
 
 
 @app.post('/api/mercadolivre/search')
