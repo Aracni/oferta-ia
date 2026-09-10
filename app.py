@@ -19,12 +19,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from supabase import create_client
 
-# V9.6 — log estruturado para rastrear todo o caminho da descoberta.
+# V9.8 — log estruturado para rastrear todo o caminho da descoberta.
 # O Render captura stdout/stderr automaticamente. Nenhum token é registrado.
 logger = logging.getLogger("oferta_ia.v9")
 if not logger.handlers:
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s | V9.6 | %(levelname)s | %(message)s"))
+    handler.setFormatter(logging.Formatter("%(asctime)s | V9.8 | %(levelname)s | %(message)s"))
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
@@ -190,7 +190,7 @@ $('refreshLogBtn')?.addEventListener('click',refreshV94Log);
 $('copyLogBtn')?.addEventListener('click',copyV94Log);
 $('clearLogBtn')?.addEventListener('click',()=>{ $('v94Log').textContent='Tela limpa. Execute ou atualize o log.'; $('v94LogStatus').textContent=''; });
 
-async function loadOpportunities(){const list=$('opportunityList'),status=$('opportunityStatus'),btn=$('runOpportunities');btn.disabled=true;btn.textContent='⏳ Procurando...';loading(list,'Buscando candidatos e priorizando os melhores...');status.textContent='Primeiro o ranking; depois o aprofundamento dos melhores produtos.';try{const d=await jsonFetch('/api/v9/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})});window.currentOpportunities=d.items||d.opportunities||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.';await refreshV94Log()}catch(e){list.innerHTML='';status.textContent='⚠️ '+e.message;await refreshV94Log()}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
+async function loadOpportunities(){const list=$('opportunityList'),status=$('opportunityStatus'),btn=$('runOpportunities');btn.disabled=true;btn.textContent='⏳ Procurando...';loading(list,'Buscando candidatos e priorizando os melhores...');status.textContent='Primeiro o ranking; depois o aprofundamento dos melhores produtos.';try{const d=await jsonFetch('/api/mercadolivre/opportunities',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})});window.currentOpportunities=d.items||d.opportunities||[];list.innerHTML=window.currentOpportunities.length?window.currentOpportunities.map(opportunityCard).join(''):'<div class="empty">Nenhuma oportunidade com dados atuais suficientes.</div>';status.textContent=d.message||'Concluído.';await refreshV94Log()}catch(e){list.innerHTML='';status.textContent='⚠️ '+e.message;await refreshV94Log()}finally{btn.disabled=false;btn.textContent='🔥 Encontrar oportunidades'}}
 async function searchProducts(){const q=$('productSearch').value.trim(),out=$('productResults'),status=$('productSearchStatus');if(!q){status.textContent='Digite um produto ou nicho.';return}loading(out,'Pesquisando e filtrando resultados...');status.textContent='Buscando apenas produtos compatíveis com sua pesquisa.';try{const d=await jsonFetch('/api/mercadolivre/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,limit:Number($('productLimit').value||10)})});window.currentSearchProducts=d.items||[];out.innerHTML=window.currentSearchProducts.length?window.currentSearchProducts.map((p,i)=>productCard(p,i,'products')).join(''):'<div class="empty">Nenhum produto principal relevante encontrado.</div>';status.textContent=`✅ ${window.currentSearchProducts.length} produto(s) relevante(s).`}catch(e){out.innerHTML='';status.textContent='⚠️ '+e.message}}
 async function addProduct(i){const p=window.currentSearchProducts?.[i];if(!p)return;try{await jsonFetch('/api/products',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:p.name,store:p.store||'Mercado Livre',url:p.url,category:p.category,current_price:p.current_price,old_price:p.old_price,image_url:p.image_url,marketplace:p.marketplace||'mercadolivre',item_id:p.item_id})});alert('Produto salvo no OFERTA IA.');loadDashboard()}catch(e){alert(e.message)}}
 async function approveOpportunity(i){const p=window.currentOpportunities?.[i];if(!p)return;const btns=document.querySelectorAll('#opportunityList button');btns.forEach(b=>b.disabled=true);try{const d=await jsonFetch('/api/approve-and-publish',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({product:p,channels:channels()})});alert(d.message||'Oferta aprovada.');loadOffersCount()}catch(e){alert(e.message)}finally{btns.forEach(b=>b.disabled=false)}}
@@ -1058,7 +1058,7 @@ def mercadolivre_opportunities(payload: dict):
 
     diag = {
         "trace_id": trace,
-        "engine": "V9.7 HIGHLIGHTS",
+        "engine": "V9.8 HIGHLIGHTS",
         "token_valid": False,
         "trends_requests": 0,
         "trend_terms": 0,
@@ -1416,7 +1416,7 @@ def mercadolivre_opportunities(payload: dict):
 
     _v93_log(
         "END",
-        "Garimpo V9.7 encerrado",
+        "Garimpo V9.8 encerrado",
         trace=trace,
         final=len(selected),
         candidates=len(candidates),
@@ -2119,8 +2119,8 @@ def _v9_analyze(item, rank_position=None, trend_rank=None, commission_rate=None)
     )
     return p
 
-@app.post("/api/v9/opportunities")
-def v9_opportunities(payload: dict):
+@app.post("/api/v9/opportunities-legacy")
+def v9_opportunities_legacy(payload: dict):
     """V9.6: garimpo com diagnóstico por etapa e erros visíveis no log do Render."""
     global _V93_LAST_DIAGNOSTIC, _V94_LOG_BUFFER
     _V94_LOG_BUFFER = []
@@ -2289,7 +2289,7 @@ def v9_search_diagnostic(q: str = "air fryer"):
 def v9_diagnostic():
     return {
         "status": "ok",
-        "engine": "OFERTA IA V9.6",
+        "engine": "OFERTA IA V9.8",
         "diagnostic": _V93_LAST_DIAGNOSTIC,
         "log": _v94_log_text(),
     }
