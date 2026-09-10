@@ -4,6 +4,7 @@ A versão integral do aplicativo permanece congelada no commit-base conhecido.
 Este carregador restaura essa versão em memória para que os patches de runtime
 possam evoluir sem duplicar o arquivo monolítico no repositório.
 """
+import time
 import urllib.request
 
 # O valor anterior era um BLOB SHA, não um commit/ref do GitHub.
@@ -18,73 +19,70 @@ except Exception as exc:
 
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
-# PATCH V10.5 — alguns endpoints públicos de catálogo do Mercado Livre
-# estão devolvendo 403 quando recebem o access_token da aplicação. A busca
-# de catálogo continua autorizada, mas a validação pública de /items/{id}
-# pode ser feita sem autenticação. Para não transformar esses 403 em perda
-# silenciosa de todos os candidatos, repetimos somente esses recursos sem
-# o header Authorization. Endpoints privados continuam protegidos.
-_oferta_original_fetch_json = _v9_fetch_json
+# PATCH V10.6 — acelera o garimpo do Mercado Livre.
+# Os logs mostraram que /items/{id} e /products/{id}/items estavam retornando
+# 403 com o token da aplicação. O código anterior fazia primeiro a chamada
+# autenticada e só depois repetia a mesma consulta sem token. Isso duplicava
+# requisições e aumentava bastante o tempo da pesquisa.
+#
+# Para recursos de catálogo, tentamos diretamente a consulta pública. Mantemos
+# produtos privados/protegidos fora deste caminho. Também usamos um cache curto
+# para evitar repetir a mesma consulta durante o mesmo garimpo.
+_OFERTA_PUBLIC_CACHE = {}
+_OFERTA_PUBLIC_CACHE_TTL = 300
 
 
-def _oferta_fetch_json_public_catalog(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
-    data, status = _oferta_original_fetch_json(token, url, params, timeout, trace, stage)
-    if status != 403:
-        return data, status
-
-    public_catalog = (
+def _oferta_public_catalog_url(url):
+    return (
         "/items/" in url
         or "/products/" in url
     ) and "/applications/" not in url
 
-    if not public_catalog:
-        return data, status
+
+def _oferta_fetch_json_optimized(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
+    if not _oferta_public_catalog_url(url):
+        return _v9_fetch_json(token, url, params, timeout, trace, stage)
+
+    safe_params = dict(params or {})
+    cache_key = (url, tuple(sorted((str(k), str(v)) for k, v in safe_params.items())))
+    cached = _OFERTA_PUBLIC_CACHE.get(cache_key)
+    if cached and time.time() - cached[0] <= _OFERTA_PUBLIC_CACHE_TTL:
+        _v93_log(stage, "Catálogo atendido pelo cache", trace=trace, url=url)
+        return cached[1], cached[2]
 
     try:
-        safe_params = dict(params or {})
-        _v93_log(
-            stage,
-            "HTTP 403 em catálogo; tentando consulta pública sem token",
-            trace=trace,
-            url=url,
-        )
+        _v93_log(stage, "Consulta pública direta do catálogo", trace=trace, url=url)
         response = requests.get(
             url,
             params=safe_params,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "OFERTA-IA/10.5",
+                "User-Agent": "OFERTA-IA/10.6",
             },
-            timeout=timeout,
+            # Catálogo público não deve segurar o garimpo por vários segundos.
+            timeout=min(int(timeout or 5), 5),
         )
         try:
-            public_data = response.json()
+            data = response.json()
         except Exception:
-            public_data = {}
+            data = {}
+        status = response.status_code
         if response.ok:
-            _v93_log(
-                stage,
-                "Consulta pública do catálogo OK",
-                trace=trace,
-                http=response.status_code,
-            )
-            return public_data, response.status_code
+            _OFERTA_PUBLIC_CACHE[cache_key] = (time.time(), data, status)
+            _v93_log(stage, "Consulta pública do catálogo OK", trace=trace, http=status)
+            return data, status
+
         _v93_log(
             "ERROR",
-            "Consulta pública do catálogo também falhou",
+            "Consulta pública do catálogo falhou",
             trace=trace,
-            http=response.status_code,
-            error=str((public_data or {}).get("message") or response.text[:300])[:300],
+            http=status,
+            error=str((data or {}).get("message") or response.text[:300])[:300],
         )
+        return data, status
     except Exception as exc:
-        _v93_log(
-            "ERROR",
-            "Falha na consulta pública do catálogo",
-            trace=trace,
-            error=str(exc)[:300],
-        )
-
-    return data, status
+        _v93_log("ERROR", "Falha na consulta pública do catálogo", trace=trace, error=str(exc)[:300])
+        return None, None
 
 
-_v9_fetch_json = _oferta_fetch_json_public_catalog
+_v9_fetch_json = _oferta_fetch_json_optimized
