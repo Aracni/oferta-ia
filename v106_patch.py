@@ -1,4 +1,5 @@
-"""Patch OFERTA IA V10.6 para priorizar Mercado Livre por nicho e ativar consulta automática."""
+"""Patch OFERTA IA V10.6 para priorizar Mercado Livre e diagnosticar a consulta automática."""
+import traceback
 import unicodedata
 
 CATEGORY_HINTS = {
@@ -42,13 +43,25 @@ def install(app):
     if original_central is not None and not getattr(original_central, "_v106_auto_meli", False):
         def central_wrapper(payload):
             payload = dict(payload or {})
-            # O modo central V10.6 consulta Mercado Livre automaticamente.
             payload["include_meli"] = True
-            result = original_central(payload)
-            if isinstance(result, dict):
-                result["engine"] = "OFERTA IA V10.6 ML OTIMIZADO"
-                result["meli_mode"] = "automatic"
-            return result
+            print("[V10.6] Consulta central iniciada com Mercado Livre automático", flush=True)
+            try:
+                result = original_central(payload)
+                if isinstance(result, dict):
+                    result["engine"] = "OFERTA IA V10.6 ML OTIMIZADO"
+                    result["meli_mode"] = "automatic"
+                print("[V10.6] Consulta central concluída", flush=True)
+                return result
+            except Exception as exc:
+                print("[V10.6] ERRO NA CONSULTA CENTRAL:", repr(exc), flush=True)
+                traceback.print_exc()
+                return {
+                    "status": "error",
+                    "engine": "OFERTA IA V10.6 ML OTIMIZADO",
+                    "meli_mode": "automatic",
+                    "error": type(exc).__name__,
+                    "message": str(exc) or "Erro inesperado na consulta central.",
+                }
         central_wrapper._v106_auto_meli = True
         for route in getattr(app.app, "routes", []):
             if getattr(route, "path", None) == "/api/opportunities-central":
@@ -56,11 +69,11 @@ def install(app):
                 try:
                     from fastapi.dependencies.utils import get_dependant
                     route.dependant = get_dependant(path=route.path, call=central_wrapper)
-                    # APIRoute já possui um handler ASGI compilado em route.app.
-                    # Recrie-o depois de trocar o endpoint para que o wrapper seja realmente executado.
                     route.app = route.get_route_handler()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print("[V10.6] ERRO AO INSTALAR ROTA CENTRAL:", repr(exc), flush=True)
+                    traceback.print_exc()
                 break
 
     app.V106_PATCH_ACTIVE = True
+    print("[V10.6] Patch ativo — Mercado Livre automático habilitado", flush=True)
