@@ -1,9 +1,7 @@
 """OFERTA IA application loader.
 
-V11.4 mantém o resolvedor independente do Mercado Livre e, principalmente,
-substitui o resolvedor histórico de PRODUCT por uma construção direta a
-partir de /products/{id} + /products/{id}/items. Assim o núcleo antigo não
-precisa validar cada publicação em /items/{item_id}.
+V11.5: resolvedor independente do Mercado Livre + garimpo central sempre
+consulta Mercado Livre junto com Shopee e garante diversidade no ranking final.
 """
 import re
 import time
@@ -22,7 +20,7 @@ source = source.replace("api.mercadolivre.com", "api.mercadolibre.com")
 exec(compile(source, _SOURCE, "exec"), globals(), globals())
 
 # ---------------------------------------------------------------------------
-# V11.4 — RESOLVEDOR INDEPENDENTE DE PRODUCT
+# V11.5 — RESOLVEDOR INDEPENDENTE DE PRODUCT + GARIMPO MULTIMARKETPLACE
 # ---------------------------------------------------------------------------
 _V11_CORE_LOG = _v93_log
 _V11_ORIGINAL_FETCH_JSON = _v9_fetch_json
@@ -31,7 +29,7 @@ _V11_PRODUCT_INDEX = {}
 _V11_CATALOG_CACHE = {}
 _V11_CATALOG_TTL = 300
 _V11_LOCK = threading.RLock()
-_V11_VERSION = "11.4"
+_V11_VERSION = "11.5"
 
 
 def _v11_log(stage, message, trace=None, **kwargs):
@@ -132,9 +130,7 @@ def _v11_best_catalog_row(product_id, payload):
         iid = row.get("item_id") or row.get("id")
         price = _v11_num(row.get("price") or row.get("current_price"))
         title = row.get("title") or product.get("name") or product.get("family_name") or ""
-        if not iid:
-            continue
-        if price is None or price <= 0:
+        if not iid or price is None or price <= 0:
             continue
         try:
             if _looks_like_accessory(title):
@@ -197,25 +193,15 @@ def _v11_normalize_offer(product_id, detail, offer, rank_position=None, query=""
 
 
 def _v11_catalog_to_item(token, product_id, rank_position=None, query=""):
-    """Resolve PRODUCT somente por catálogo; jamais chama /items/{id}."""
     pid = str(product_id or "").upper()
     if not pid:
         return None
 
-    detail, status = _v11_fetch_json(
-        token,
-        f"https://api.mercadolibre.com/products/{pid}",
-        timeout=10,
-    )
+    detail, status = _v11_fetch_json(token, f"https://api.mercadolibre.com/products/{pid}", timeout=10)
     if not isinstance(detail, dict) or not (status and 200 <= int(status) < 300):
-        try:
-            _v93_log("CATALOG_V11", "PRODUCT sem detalhe utilizável", product_id=pid, http=status)
-        except Exception:
-            pass
+        _v93_log("CATALOG_V11", "PRODUCT sem detalhe utilizável", product_id=pid, http=status)
         return None
 
-    # O wrapper de /products/{id} já tentou enriquecer o winner. Preferimos
-    # winner somente se ele realmente tiver item + preço válido.
     winner = detail.get("buy_box_winner")
     if isinstance(winner, dict):
         p = _v11_normalize_offer(pid, detail, winner, rank_position, query)
@@ -224,13 +210,10 @@ def _v11_catalog_to_item(token, product_id, rank_position=None, query=""):
             _v11_log("CATALOG_V11", "PRODUCT resolvido pelo buy_box_winner", product_id=pid, item_id=p["item_id"], price=p["current_price"])
             return p
 
-    # Caso o winner esteja ausente/inválido, usa diretamente as ofertas do
-    # endpoint de catálogo. Nenhuma chamada /items/{item_id} é necessária.
-    items_url = f"https://api.mercadolibre.com/products/{pid}/items"
     items_data, items_status = _v11_fetch_json(
         token,
-        items_url,
-        {"limit": 20},
+        f"https://api.mercadolibre.com/products/{pid}/items",
+        {"limit": 50},
         timeout=10,
     )
     if not (items_status and 200 <= int(items_status) < 300):
@@ -240,7 +223,7 @@ def _v11_catalog_to_item(token, product_id, rank_position=None, query=""):
     _v11_remember_items(pid, items_data)
     best = _v11_best_catalog_row(pid, items_data)
     if not best:
-        _v93_log("CATALOG_V11", "PRODUCT sem oferta válida no catálogo", product_id=pid)
+        _v93_log("CATALOG_V11", "PRODUCT sem oferta válida no catálogo", product_id=pid, rows=len(_v11_rows(items_data)))
         return None
 
     p = _v11_normalize_offer(pid, detail, best, rank_position, query)
@@ -249,8 +232,6 @@ def _v11_catalog_to_item(token, product_id, rank_position=None, query=""):
         _v93_log("CATALOG_V11", "PRODUCT resolvido por oferta do catálogo", product_id=pid, item_id=p["item_id"], price=p["current_price"])
     return p
 
-
-# Substitui exatamente a função usada pelo motor V9.7 para PRODUCT.
 _v9_catalog_to_item = _v11_catalog_to_item
 
 
@@ -260,7 +241,6 @@ def _v11_enrich_product_payload(pid, data, token, trace=None):
     winner = data.get("buy_box_winner")
     winner_price = _v11_num(winner.get("price")) if isinstance(winner, dict) else None
     winner_id = winner.get("item_id") if isinstance(winner, dict) else None
-
     price_range = data.get("buy_box_winner_price_range")
     if isinstance(winner, dict) and winner_id and winner_price is None and isinstance(price_range, dict):
         minimum = price_range.get("min")
@@ -268,17 +248,16 @@ def _v11_enrich_product_payload(pid, data, token, trace=None):
         minimum_price = _v11_num(minimum_price)
         if minimum_price is not None and minimum_price > 0:
             enriched = dict(data)
-            enriched_winner = dict(winner)
-            enriched_winner["price"] = minimum_price
-            enriched["buy_box_winner"] = enriched_winner
+            ew = dict(winner)
+            ew["price"] = minimum_price
+            enriched["buy_box_winner"] = ew
             return enriched
-
     if winner_id and winner_price is not None:
         return data
-
     try:
-        items_url = f"https://api.mercadolibre.com/products/{pid}/items"
-        items_data, items_status = _V11_ORIGINAL_FETCH_JSON(token, items_url, {"limit": 20}, 12, trace, "CATALOG")
+        items_data, items_status = _V11_ORIGINAL_FETCH_JSON(
+            token, f"https://api.mercadolibre.com/products/{pid}/items", {"limit": 50}, 12, trace, "CATALOG"
+        )
         if items_status and 200 <= int(items_status) < 300:
             _v11_remember_items(pid, items_data)
             best = _v11_best_catalog_row(pid, items_data)
@@ -287,10 +266,7 @@ def _v11_enrich_product_payload(pid, data, token, trace=None):
                 enriched["buy_box_winner"] = best
                 return enriched
     except Exception as exc:
-        try:
-            _v93_log("CATALOG_V11", "Falha ao enriquecer produto sem winner utilizável", trace=trace, product_id=pid, error=str(exc)[:180])
-        except Exception:
-            pass
+        _v93_log("CATALOG_V11", "Falha ao enriquecer produto sem winner utilizável", trace=trace, product_id=pid, error=str(exc)[:180])
     return data
 
 
@@ -306,10 +282,11 @@ def _v11_synthetic_item(item_id):
     permalink = row.get("permalink")
     if not isinstance(permalink, str) or not permalink.startswith("http"):
         permalink = f"https://produto.mercadolivre.com.br/{item_id}"
+    seller = row.get("seller") if isinstance(row.get("seller"), dict) else {}
     return {
         "id": str(item_id), "item_id": str(item_id), "site_id": site_id,
         "title": title, "name": title,
-        "seller_id": row.get("seller_id") or (row.get("seller") or {}).get("id"),
+        "seller_id": row.get("seller_id") or seller.get("id"),
         "category_id": row.get("category_id"),
         "price": price, "base_price": price, "current_price": price,
         "original_price": original, "currency_id": row.get("currency_id") or "BRL",
@@ -330,37 +307,31 @@ def _v11_synthetic_item(item_id):
 def _v11_public_search(token, item_id, trace=None):
     try:
         site = _v11_site_from_id(item_id)
-        url = f"https://api.mercadolibre.com/sites/{site}/search"
-        params = {"q": str(item_id), "limit": 10}
-        response = requests.get(url, params=params, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.4"}, timeout=5)
+        response = requests.get(
+            f"https://api.mercadolibre.com/sites/{site}/search",
+            params={"q": str(item_id), "limit": 10},
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/11.5"},
+            timeout=5,
+        )
         data = response.json() if response.content else {}
         for candidate in (data or {}).get("results", []) if isinstance(data, dict) else []:
             if str(candidate.get("id")) == str(item_id):
                 return candidate, response.status_code
     except Exception as exc:
-        try:
-            _v93_log("ERROR", "Fallback público do ITEM falhou", trace=trace, error=str(exc)[:220])
-        except Exception:
-            pass
+        _v93_log("ERROR", "Fallback público do ITEM falhou", trace=trace, error=str(exc)[:220])
     return None, None
 
 
 def _v11_fetch_json(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
     url_text = str(url or "")
     lower_url = url_text.lower()
-
     item_match = re.search(r"/items/(ML[A-Z][0-9]+)(?:/|$)", url_text, re.I)
     if item_match and "/products/" not in lower_url:
         item_id = item_match.group(1).upper()
         with _V11_LOCK:
             cached = _V11_ITEM_INDEX.get(item_id)
         if cached:
-            data = _v11_synthetic_item(item_id)
-            try:
-                _v93_log("CATALOG_V11", "ITEM resolvido pelo índice do catálogo; /items/{id} bloqueado", trace=trace, item_id=item_id, http=200)
-            except Exception:
-                pass
-            return data, 200
+            return _v11_synthetic_item(item_id), 200
         if url_text.rstrip("/").lower().endswith("/items/" + item_id.lower()):
             data, status = _v11_public_search(token, item_id, trace=trace)
             if data is not None:
@@ -398,16 +369,91 @@ def _v11_fetch_json(token, url, params=None, timeout=10, trace=None, stage="HTTP
                 _v11_remember_product(data)
     return data, status
 
-
 _v9_fetch_json = _v11_fetch_json
 
 try:
     if "_meli_get" in globals():
         def _v11_meli_get(token, url, params=None, timeout=10):
-            data, status = _v11_fetch_json(token, url, params, timeout)
-            return data, status
+            return _v11_fetch_json(token, url, params, timeout)
         _meli_get = _v11_meli_get
 except Exception:
     pass
 
-print("[V11.4] resolvedor independente ativo: PRODUCT usa /products/{id} + /products/{id}/items; /items/{id} bloqueado", flush=True)
+# ---------------------------------------------------------------------------
+# O garimpo central antigo usava modo rápido por padrão. Isso fazia a UI
+# consultar somente Shopee. V11.5 torna o modo completo explícito na própria
+# interface e, adicionalmente, força include_meli=true no endpoint central.
+# ---------------------------------------------------------------------------
+_V11_ORIGINAL_OPPORTUNITIES_CENTRAL = opportunities_central
+
+
+def _v11_marketplace_mix(items, limit):
+    items = list(items or [])
+    if not items:
+        return []
+    limit = max(1, int(limit or 10))
+    ml = [x for x in items if str(x.get("marketplace") or "").lower() == "mercadolivre"]
+    sh = [x for x in items if str(x.get("marketplace") or "").lower() == "shopee"]
+    other = [x for x in items if x not in ml and x not in sh]
+    ranked = sorted(items, key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+
+    # Se ambos providers entregarem candidatos, reserva até 2 vagas para ML
+    # e até 2 para Shopee, sem sacrificar o ranking do restante.
+    picks = []
+    seen = set()
+    for group in (ml[:2], sh[:2]):
+        for item in group:
+            key = f"{item.get('marketplace')}:{item.get('item_id') or item.get('url') or item.get('name')}"
+            if key not in seen and len(picks) < limit:
+                picks.append(item)
+                seen.add(key)
+    for item in ranked:
+        key = f"{item.get('marketplace')}:{item.get('item_id') or item.get('url') or item.get('name')}"
+        if key not in seen and len(picks) < limit:
+            picks.append(item)
+            seen.add(key)
+    picks.sort(key=lambda x: float(x.get("opportunity_score") or 0), reverse=True)
+    return picks[:limit]
+
+
+def _v11_opportunities_central(payload: dict):
+    body = dict(payload or {})
+    body["include_meli"] = True
+    result = _V11_ORIGINAL_OPPORTUNITIES_CENTRAL(body)
+    items = result.get("items") or result.get("opportunities") or []
+    try:
+        limit = max(5, min(20, int(body.get("limit") or 10)))
+    except Exception:
+        limit = 10
+    mixed = _v11_marketplace_mix(items, limit)
+    diagnostic = list(result.get("diagnostic") or [])
+    ml_count = sum(1 for x in items if str(x.get("marketplace") or "").lower() == "mercadolivre")
+    sh_count = sum(1 for x in items if str(x.get("marketplace") or "").lower() == "shopee")
+    diagnostic.append(f"V11.5: Mercado Livre={ml_count} · Shopee={sh_count}")
+    result["mode"] = "completo"
+    result["items"] = mixed
+    result["opportunities"] = mixed
+    result["returned"] = len(mixed)
+    result["diagnostic"] = diagnostic
+    result["message"] = " · ".join(diagnostic)
+    return result
+
+for _route in getattr(app, "routes", []):
+    if getattr(_route, "path", None) == "/api/opportunities-central" and "POST" in (getattr(_route, "methods", set()) or set()):
+        _route.endpoint = _v11_opportunities_central
+
+# Atualiza a mensagem e o payload da interface, que antes informavam
+# incorretamente que o Mercado Livre não era consultado no modo padrão.
+try:
+    HTML = HTML.replace(
+        "status.textContent='⚡ Modo rápido: Shopee primeiro. Mercado Livre não bloqueia o garimpo.';",
+        "status.textContent='⚡ Modo completo: Shopee + Mercado Livre. Aguarde a análise dos dois marketplaces.';"
+    )
+    HTML = HTML.replace(
+        "body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10)})",
+        "body:JSON.stringify({niche:$('opportunityNiche').value.trim(),limit:Number($('opportunityLimit').value||10),include_meli:true})"
+    )
+except Exception:
+    pass
+
+print("[V11.5] Mercado Livre + Shopee ativos no garimpo central; PRODUCT via catálogo; /items/{id} bloqueado; ranking com diversidade", flush=True)
