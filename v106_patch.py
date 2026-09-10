@@ -82,7 +82,7 @@ def install(app):
             break
 
     if original_ml is not None and not getattr(original_ml, "_v107_wrapped", False):
-        def ml_wrapper(payload):
+        def ml_wrapper(payload: dict):
             payload = dict(payload or {})
             niche = _norm(payload.get("niche"))
             if niche and not payload.get("category_id"):
@@ -105,7 +105,7 @@ def install(app):
         app.mercadolivre_opportunities = ml_wrapper
 
     if original_central is not None and not getattr(original_central, "_v107_auto_meli", False):
-        def central_wrapper(payload):
+        def central_wrapper(payload: dict):
             payload = dict(payload or {})
             payload["include_meli"] = True
             niche = str(payload.get("niche") or "").strip()
