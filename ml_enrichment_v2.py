@@ -1,8 +1,9 @@
-"""OFERTA IA V11.10.11 — patch de enriquecimento do Mercado Livre.
+"""OFERTA IA V11.10.12 — patch de enriquecimento do Mercado Livre.
 
 Mantém o enriquecimento V11.10.2 e fixa o seletor de marketplace
 estruturalmente dentro do formulário de Oportunidades, imediatamente antes
-do campo opportunityNiche. Não usa middleware, MutationObserver ou wrapper
+do campo opportunityNiche. Remove versões antigas do seletor para evitar
+conflitos de HTML/JavaScript. Não usa middleware, MutationObserver ou wrapper
 ASGI para a interface.
 """
 import math
@@ -158,51 +159,68 @@ def _v1120_enrich_ml(items):
 
 _v119_enrich_ml = _v1120_enrich_ml
 
-# UI única e estrutural. Ela é sempre reconstruída no ponto exato do formulário.
-_V1120_UI = r'''<style>
-#oferta-market-filter{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px;padding:10px;border:1px solid #e4e7ec;border-radius:12px;background:#f8fafc;align-items:center;width:100%;box-sizing:border-box}
-#oferta-market-filter .market-title{font-weight:800;margin-right:3px}
-#oferta-market-filter label{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid #d0d5dd;border-radius:9px;cursor:pointer;user-select:none;background:#fff;font-size:13px}
-#oferta-market-filter input{width:auto;padding:0;margin:0;accent-color:#2563eb}
-#oferta-market-filter label.active{font-weight:800;box-shadow:0 0 0 1px #2563eb inset}
-</style>
-<div id="oferta-market-filter" aria-label="Marketplace">
-<span class="market-title">Marketplace:</span>
-<label><input type="radio" name="oferta_marketplace" value="both" checked> 🔘 Ambos — padrão</label>
-<label><input type="radio" name="oferta_marketplace" value="mercadolivre"> ⚪ Mercado Livre</label>
-<label><input type="radio" name="oferta_marketplace" value="shopee"> ⚪ Shopee</label>
+# UI única e estrutural. Primeiro removemos versões antigas para que somente
+# uma implementação possa existir no HTML final.
+_V1120_UI = r'''<div id="oferta-market-filter" aria-label="Marketplace" style="grid-column:1 / -1;display:flex;flex-direction:column;gap:9px;margin:2px 0 4px;padding:12px;border:1px solid #d0d5dd;border-radius:12px;background:#f8fafc;width:100%;box-sizing:border-box">
+  <div style="font-weight:800;font-size:14px;color:#172033">Marketplace</div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;width:100%">
+    <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #2563eb;border-radius:9px;background:#fff;cursor:pointer;font-size:13px;font-weight:800;box-sizing:border-box">
+      <input type="radio" name="oferta_marketplace" value="both" checked style="width:auto;margin:0;padding:0;accent-color:#2563eb"> Ambos — padrão
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #d0d5dd;border-radius:9px;background:#fff;cursor:pointer;font-size:13px;font-weight:400;box-sizing:border-box">
+      <input type="radio" name="oferta_marketplace" value="mercadolivre" style="width:auto;margin:0;padding:0;accent-color:#2563eb"> Mercado Livre
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:1px solid #d0d5dd;border-radius:9px;background:#fff;cursor:pointer;font-size:13px;font-weight:400;box-sizing:border-box">
+      <input type="radio" name="oferta_marketplace" value="shopee" style="width:auto;margin:0;padding:0;accent-color:#2563eb"> Shopee
+    </label>
+  </div>
 </div>
 <script>
 (function(){
-  var box=document.getElementById('oferta-market-filter'); if(!box)return;
+  if(window.__ofertaMarketplaceFilterInstalled)return;
+  window.__ofertaMarketplaceFilterInstalled=true;
+  var box=document.getElementById('oferta-market-filter');
+  if(!box)return;
   var radios=box.querySelectorAll('input[name="oferta_marketplace"]');
   function selected(){for(var i=0;i<radios.length;i++)if(radios[i].checked)return radios[i].value;return 'both';}
-  function paint(){for(var i=0;i<radios.length;i++){var label=radios[i].parentElement;if(label)label.classList.toggle('active',radios[i].checked);}}
-  var saved=null; try{saved=localStorage.getItem('oferta_ia_marketplace')}catch(e){}
+  function paint(){for(var i=0;i<radios.length;i++){var label=radios[i].parentElement;if(label){label.style.fontWeight=radios[i].checked?'800':'400';label.style.borderColor=radios[i].checked?'#2563eb':'#d0d5dd';}}}
+  var saved=null;
+  try{saved=localStorage.getItem('oferta_ia_marketplace')}catch(e){}
   if(saved){for(var i=0;i<radios.length;i++)radios[i].checked=(radios[i].value===saved);}
   for(var i=0;i<radios.length;i++)radios[i].addEventListener('change',function(){paint();try{localStorage.setItem('oferta_ia_marketplace',selected())}catch(e){}});
   paint();
+  if(window.__ofertaMarketplaceFetchWrapped)return;
+  window.__ofertaMarketplaceFetchWrapped=true;
   var originalFetch=window.fetch;
   window.fetch=function(input,init){
-    try{var url=typeof input==='string'?input:(input&&input.url)||'';if(url.indexOf('/api/opportunities-central')!==-1&&init&&typeof init.body==='string'){var body=JSON.parse(init.body);body.marketplaces=selected();init=Object.assign({},init,{body:JSON.stringify(body)});}}catch(e){}
+    try{
+      var url=typeof input==='string'?input:(input&&input.url)||'';
+      if(url.indexOf('/api/opportunities-central')!==-1&&init&&typeof init.body==='string'){
+        var body=JSON.parse(init.body);body.marketplaces=selected();init=Object.assign({},init,{body:JSON.stringify(body)});
+      }
+    }catch(e){}
     return originalFetch.call(this,input,init);
   };
 })();
 </script>'''
 
 try:
-    # Remove any old selector block, then put exactly one copy before opportunityNiche.
+    # Remove the previous structural selector and the original V11.9 selector.
     HTML = re.sub(r'<style>\s*#oferta-market-filter[\s\S]*?</script>\s*', '', HTML, count=1)
+    HTML = re.sub(r'<style>\s*#v119-market-filter[\s\S]*?</script>\s*', '', HTML, count=1)
+    HTML = re.sub(r'<div id="oferta-market-filter"[\s\S]*?</script>\s*', '', HTML, count=1)
+    HTML = re.sub(r'<div id="v119-market-filter"[\s\S]*?</script>\s*', '', HTML, count=1)
+
     anchor = re.search(r'<input\s+id="opportunityNiche"\b[^>]*>', HTML)
     if anchor:
         HTML = HTML[:anchor.start()] + _V1120_UI + '\n' + HTML[anchor.start():]
-        print('[V11.10.11] seletor fixado diretamente antes de opportunityNiche', flush=True)
+        print('[V11.10.12] seletor único fixado diretamente antes de opportunityNiche', flush=True)
     elif '</body>' in HTML:
         HTML = HTML.replace('</body>', _V1120_UI + '</body>', 1)
-        print('[V11.10.11] seletor inserido antes de </body> (fallback)', flush=True)
+        print('[V11.10.12] seletor inserido antes de </body> (fallback)', flush=True)
     else:
-        print('[V11.10.11] ERRO: âncora opportunityNiche não encontrada', flush=True)
+        print('[V11.10.12] ERRO: âncora opportunityNiche não encontrada', flush=True)
 except Exception as exc:
-    print(f'[V11.10.11] falha controlada na UI: {exc}', flush=True)
+    print(f'[V11.10.12] falha controlada na UI: {exc}', flush=True)
 
-print('[V11.10.11] vendas ML via /products/{id}; seletor estrutural ativo', flush=True)
+print('[V11.10.12] vendas ML via /products/{id}; seletor estrutural único ativo', flush=True)
