@@ -66,7 +66,7 @@ def _v114_rescore(item):
     price = _v114_num(item.get("current_price"))
     signals = []
     if sold is not None:
-        signals.append((min(100.0, math.log1p(max(0, sold)) / math.log1p(10000) * 100.0, 0.45))
+        signals.append((min(100.0, math.log1p(max(0, sold)) / math.log1p(10000) * 100.0), 0.45))
     if rating is not None:
         signals.append((rating / 5.0 * 100.0, 0.20))
     if discount is not None:
@@ -75,8 +75,8 @@ def _v114_rescore(item):
         signals.append((100.0 if price <= 50 else 90.0 if price <= 100 else 75.0 if price <= 200 else 60.0, 0.15))
     if not signals:
         return score
-    total = sum(w for _, _, w in signals)
-    fresh = sum(v * w for v, _, w in signals) / total
+    total = sum(weight for _, weight in signals)
+    fresh = sum(value * weight for value, weight in signals) / total
     return round(old * 0.35 + fresh * 0.65, 2) if score is not None else round(fresh, 2)
 
 
@@ -84,6 +84,7 @@ _original_enrich_v114 = _v119_enrich_ml
 
 
 def _v114_enrich_ml(items):
+    _V114_STATS.update({"item_requests": 0, "sold_found": 0, "sold_from_items": 0})
     enriched = _original_enrich_v114(items)
     try:
         token = _v9_valid_meli_token()
