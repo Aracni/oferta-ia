@@ -1,86 +1,83 @@
-"""OFERTA IA V11.11.
-Carrega V11.9 e garante que o seletor de marketplace apareça dentro da janela de Oportunidades.
+"""OFERTA IA V11.12.
+Corrige a posição do seletor de marketplace dentro da janela de oportunidades.
 """
+import re
 import urllib.request
 
-_BASE = "https://raw.githubusercontent.com/Aracni/oferta-ia/639b53c7e97152b2756e70eef2940454ae3420d7/app.py"
-try:
-    with urllib.request.urlopen(_BASE, timeout=20) as response:
-        source = response.read().decode("utf-8")
-except Exception as exc:
-    raise RuntimeError(f"Não foi possível carregar o núcleo V11.9 do OFERTA IA: {exc}") from exc
-
+_BASE = "https://raw.githubusercontent.com/Aracni/oferta-ia/9ec0735ab105d9a0d76432d1c82a7996cf1b7c26/app.py"
+with urllib.request.urlopen(_BASE, timeout=30) as response:
+    source = response.read().decode("utf-8")
+source = source.replace("api.mercadolivre.com", "api.mercadolibre.com")
 exec(compile(source, _BASE, "exec"), globals(), globals())
 
-try:
-    _V111_UI = r'''<style>
-#v119-market-filter{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 14px;padding:10px;border-radius:12px;background:rgba(127,127,127,.10);align-items:center;width:100%;box-sizing:border-box}
-#v119-market-filter .v119-title{font-weight:700;margin-right:4px}
-#v119-market-filter label{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid rgba(127,127,127,.28);border-radius:9px;cursor:pointer;user-select:none}
-#v119-market-filter input{accent-color:currentColor}
-#v119-market-filter label.v119-active{font-weight:700;box-shadow:0 0 0 1px currentColor inset}
+_V112_UI = r'''<style>
+#v112-market-filter{margin:12px 0;padding:10px 12px;border:1px solid rgba(127,127,127,.25);border-radius:10px;font-size:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:rgba(127,127,127,.06)}
+#v112-market-filter .v112-title{font-weight:700;margin-right:2px}
+#v112-market-filter label{display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap}
+#v112-market-filter input{accent-color:currentColor}
 </style>
-<div id="v119-market-filter" aria-label="Marketplace">
-  <span class="v119-title">Marketplace:</span>
-  <label><input type="radio" name="v119_market" value="both" checked> Ambos</label>
-  <label><input type="radio" name="v119_market" value="mercadolivre"> Mercado Livre</label>
-  <label><input type="radio" name="v119_market" value="shopee"> Shopee</label>
-</div>
 <script>
 (function(){
-  function setup(){
-    if(document.getElementById('v119-market-filter')) return true;
-    const box=document.createElement('div');
-    box.id='v119-market-filter'; box.setAttribute('aria-label','Marketplace');
-    box.innerHTML='<span class="v119-title">Marketplace:</span>'+
-      '<label><input type="radio" name="v119_market" value="both" checked> Ambos</label>'+
-      '<label><input type="radio" name="v119_market" value="mercadolivre"> Mercado Livre</label>'+
-      '<label><input type="radio" name="v119_market" value="shopee"> Shopee</label>';
-    const inputs=[...box.querySelectorAll('input[name=v119_market]')];
-    function selected(){const x=inputs.find(i=>i.checked);return x?x.value:'both'}
-    function paint(){inputs.forEach(i=>i.closest('label').classList.toggle('v119-active',i.checked))}
-    inputs.forEach(i=>i.addEventListener('change',function(){paint();localStorage.setItem('oferta_ia_marketplace',selected())}));
-    const saved=localStorage.getItem('oferta_ia_marketplace');
-    if(saved&&inputs.some(i=>i.value===saved)) inputs.forEach(i=>i.checked=i.value===saved);
-    paint();
-    const all=[...document.querySelectorAll('input,button,div,label')];
-    const anchor=all.find(el=>((el.textContent||'').trim().startsWith('Opcional: beleza')));
-    const qty=all.find(el=>el.tagName==='INPUT'&&((el.type||'').toLowerCase()==='number'));
-    const target=anchor||qty||all.find(el=>((el.textContent||'').includes('Encontrar oportunidades')));
-    if(target&&target.parentNode){
-      if(qty&&qty.parentNode&&target===qty) qty.parentNode.insertBefore(box,qty);
-      else target.parentNode.insertBefore(box,target.nextSibling);
-    } else {
-      const modal=[...document.querySelectorAll('div')].find(el=>((el.textContent||'').includes('Encontrar oportunidades')&&el.offsetParent));
-      if(modal) modal.insertBefore(box,modal.firstChild);
-      else document.body.appendChild(box);
+  const ID='v112-market-filter';
+  const OLD='v119-market-filter';
+  function selected(){const x=document.querySelector('input[name="v112_market"]:checked');return x?x.value:'both'}
+  function makeBox(){
+    let box=document.getElementById(ID);
+    if(box) return box;
+    box=document.createElement('div'); box.id=ID; box.setAttribute('aria-label','Marketplace');
+    box.innerHTML='<span class="v112-title">Marketplace:</span>'+['both|Ambos','mercadolivre|Mercado Livre','shopee|Shopee'].map(function(v){const p=v.split('|');return '<label><input type="radio" name="v112_market" value="'+p[0]+'"> '+p[1]+'</label>'}).join('');
+    box.querySelectorAll('input').forEach(function(i){i.addEventListener('change',function(){localStorage.setItem('oferta_ia_marketplace',selected())})});
+    const saved=localStorage.getItem('oferta_ia_marketplace')||'both';
+    const radio=box.querySelector('input[value="'+saved+'"]')||box.querySelector('input[value="both"]');
+    radio.checked=true;
+    return box;
+  }
+  function visible(el){return !!el && (el.offsetWidth||el.offsetHeight||el.getClientRects().length)}
+  function findModal(){
+    const dialogs=[...document.querySelectorAll('[role="dialog"],dialog')].filter(visible);
+    for(const d of dialogs){const t=d.innerText||'';if(t.includes('Oportunidades')&&t.includes('Encontrar oportunidades'))return d}
+    const nodes=[...document.querySelectorAll('div')].filter(visible).filter(function(el){const t=el.innerText||'';return t.includes('Oportunidades')&&t.includes('Encontrar oportunidades')});
+    nodes.sort((a,b)=>a.innerText.length-b.innerText.length);
+    return nodes[0]||null;
+  }
+  function place(){
+    const modal=findModal(); if(!modal)return false;
+    const box=makeBox();
+    const qty=[...modal.querySelectorAll('input')].find(function(i){return (i.type||'').toLowerCase()==='number'&&visible(i)});
+    const niche=[...modal.querySelectorAll('*')].find(function(el){return visible(el)&&((el.textContent||'').trim().startsWith('Opcional: beleza, eletrônicos, fitness'))});
+    const button=[...modal.querySelectorAll('button')].find(function(b){return visible(b)&&(b.textContent||'').includes('Encontrar oportunidades')});
+    if(qty&&qty.parentNode){
+      const parent=qty.parentNode;
+      if(box.parentNode!==parent || box.nextSibling!==qty) parent.insertBefore(box,qty);
+      return true;
     }
+    if(niche&&niche.parentNode){niche.parentNode.insertBefore(box,niche.nextSibling);return true}
+    if(button&&button.parentNode){button.parentNode.insertBefore(box,button);return true}
+    if(box.parentNode!==modal)modal.appendChild(box);
     return true;
   }
-  function selectedValue(){const x=document.querySelector('input[name=v119_market]:checked');return x?x.value:'both'}
+  function cleanOld(){const old=document.getElementById(OLD);if(old)old.remove()}
+  cleanOld(); place();
+  let timer=0;
+  const observer=new MutationObserver(function(){cleanOld();clearTimeout(timer);timer=setTimeout(place,30)});
+  if(document.body)observer.observe(document.body,{childList:true,subtree:true});
   const originalFetch=window.fetch;
   window.fetch=function(input,init){
     try{
       const url=typeof input==='string'?input:(input&&input.url)||'';
       if(url.includes('/api/opportunities-central')&&init&&typeof init.body==='string'){
-        const body=JSON.parse(init.body); body.marketplaces=selectedValue(); init=Object.assign({},init,{body:JSON.stringify(body)});
+        const body=JSON.parse(init.body); body.marketplaces=selected(); init=Object.assign({},init,{body:JSON.stringify(body)});
       }
     }catch(e){}
     return originalFetch.call(this,input,init);
   };
-  setup();
-  const observer=new MutationObserver(function(){setup()});
-  observer.observe(document.documentElement,{childList:true,subtree:true});
+  window.setInterval(place,1000);
 })();
 </script>'''
-    # First try to place it in the existing HTML, but do not depend on the
-    # internal structure of the V11.8 modal. The script itself also watches
-    # dynamically-created modal content and inserts the selector there.
-    if '</body>' in HTML:
-        HTML = HTML.replace('</body>', _V111_UI + '</body>')
-    else:
-        HTML += _V111_UI
-except Exception:
-    pass
 
-print("[V11.11] seletor marketplace inserido dentro da janela de Oportunidades; seleção única; padrão=Ambos", flush=True)
+if "id=\"v112-market-filter\"" not in HTML and "</body>" in HTML:
+    HTML = HTML.replace("</body>", _V112_UI + "</body>")
+else:
+    HTML = HTML.replace("</body>", _V112_UI + "</body>")
+
+print("[V11.12] seletor de marketplace reposicionado dentro da janela de oportunidades; seleção única e filtro preservado")
