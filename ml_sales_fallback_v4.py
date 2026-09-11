@@ -1,12 +1,8 @@
-"""V11.11.8 — fallback de vendas do Mercado Livre.
+"""V11.11.9 — fallback de vendas do Mercado Livre.
 
-Complementa o enriquecimento sem inventar dados: quando /products/{id} não
-entrega sold_quantity, consulta /products/{id}/items e procura sold_quantity
-nas ofertas retornadas. Avaliações continuam dependendo de /reviews/item.
-
-IMPORTANTE: a rota central recebe JSON no corpo. Por isso o wrapper usa
-fastapi.Body explicitamente para não transformar `payload` em parâmetro de
-query string.
+Complementa o enriquecimento V11.11 sem reconstruir a rota HTTP novamente.
+Quando /products/{id} não entrega sold_quantity, consulta
+/products/{id}/items e procura sold_quantity nas ofertas retornadas.
 """
 import math
 from fastapi import Body
@@ -116,46 +112,12 @@ def _v114_enrich_ml(items):
         item["data_confidence"] = "alta" if item.get("rating") is not None and item.get("discount_rate") is not None else "média"
         item["confidence"] = item["data_confidence"]
         item["opportunity_score"] = _v114_rescore(item)
-        item["enrichment_version"] = "V11.11.8"
+        item["enrichment_version"] = "V11.11.9"
     return enriched
 
 
+# Instala somente a camada de enriquecimento. A rota central já foi
+# reconstruída corretamente pelo V11.11.6 e não deve ser embrulhada de novo.
 _v119_enrich_ml = _v114_enrich_ml
 
-_original_central_v114 = _v111_central
-
-
-def _v114_central(payload: dict = Body(default={} )):
-    result = _original_central_v114(payload)
-    if isinstance(result, dict):
-        diagnostic = list(result.get("diagnostic") or [])
-        diagnostic.append(
-            "V11.11.8 vendas ML: "
-            f"items_requests={_V114_STATS['item_requests']} "
-            f"sold_fallback={_V114_STATS['sold_from_items']}"
-        )
-        result["diagnostic"] = diagnostic
-        result["message"] = " · ".join(diagnostic)
-    return result
-
-for _route in getattr(app, "routes", []):
-    if getattr(_route, "path", None) == "/api/opportunities-central" and "POST" in (getattr(_route, "methods", set()) or set()):
-        _route.endpoint = _v114_central
-        try:
-            from fastapi.dependencies.utils import get_dependant
-            from fastapi.routing import request_response
-            _route.dependant = get_dependant(path=_route.path, call=_v114_central)
-            _route.app = request_response(_route.get_route_handler())
-            try:
-                import meli_fast as _meli_fast
-                _base = _route.app
-                async def _v114_route_app(scope, receive, send, _original=_base):
-                    return await _meli_fast._asgi(scope, receive, send, _original)
-                _route.app = _v114_route_app
-            except Exception:
-                pass
-        except Exception as exc:
-            print(f"[V11.11.8][ERRO] rota: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
-        break
-
-print("[V11.11.8] fallback de vendas via /products/{id}/items ativo | BODY JSON preservado", flush=True)
+print("[V11.11.9] fallback de vendas via /products/{id}/items ativo | sem reconstruir rota", flush=True)
