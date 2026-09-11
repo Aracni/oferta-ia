@@ -1,10 +1,5 @@
-"""V11.11.2 — correção estrutural final da UI de Marketplace.
-
-Garante um único seletor Marketplace dentro do formulário de Oportunidades.
-Não usa middleware, MutationObserver, polling ou alteração da rota.
-"""
+"""V11.11.5 — UI do seletor + diagnóstico legível de erros HTTP."""
 import re
-
 
 _SELECTOR = r'''<div id="oferta-market-filter" style="margin:10px 0;padding:10px;border:1px solid rgba(255,255,255,.12);border-radius:10px">
   <strong>Marketplace</strong>
@@ -46,14 +41,42 @@ _SELECTOR = r'''<div id="oferta-market-filter" style="margin:10px 0;padding:10px
 </script>
 '''
 
+_ERROR_HELPER = r'''<script>
+(function(){
+  // O núcleo antigo fazia Error(d.detail). Quando detail é objeto/array,
+  // o navegador transforma isso em "[object Object]". Mostramos o conteúdo real.
+  window.ofertaFormatError = function(detail, status){
+    if (typeof detail === "string" && detail.trim()) return detail;
+    if (detail && typeof detail === "object") {
+      if (typeof detail.message === "string" && detail.message.trim()) return detail.message;
+      if (typeof detail.error === "string" && detail.error.trim()) return detail.error;
+      try { return JSON.stringify(detail); } catch(e) {}
+    }
+    return "HTTP " + status + " — erro inesperado";
+  };
+  window.jsonFetch = async function(url, opts={}){
+    const r = await fetch(url, opts);
+    let d = {};
+    try { d = await r.json(); } catch(e) {}
+    if (!r.ok) throw Error(window.ofertaFormatError(d && d.detail, r.status));
+    return d;
+  };
+})();
+</script>
+'''
+
 
 def install(app):
     html = getattr(app, "HTML", None)
     if not isinstance(html, str):
-        raise RuntimeError("V11.11.2: HTML da aplicação não encontrado")
+        raise RuntimeError("V11.11.5: HTML da aplicação não encontrado")
 
-    # Remova qualquer versão antiga do seletor para garantir exatamente uma.
-    html = re.sub(r'<div id="(?:oferta-market-filter|v119-market-filter)"[\s\S]*?</script>\s*', '', html, flags=re.IGNORECASE)
+    html = re.sub(
+        r'<div id="(?:oferta-market-filter|v119-market-filter)"[\s\S]*?</script>\s*',
+        '',
+        html,
+        flags=re.IGNORECASE,
+    )
 
     block = _SELECTOR.strip() + "\n"
     anchors = [
@@ -70,13 +93,30 @@ def install(app):
         html = html[:anchor.start()] + block + html[anchor.start():]
         location = "antes de opportunityNiche"
     else:
-        section = re.search(r'<section[^>]*id=["\']opportunitySection["\'][^>]*>', html, flags=re.IGNORECASE)
+        section = re.search(
+            r'<section[^>]*id=["\']opportunitySection["\'][^>]*>',
+            html,
+            flags=re.IGNORECASE,
+        )
         if not section:
-            raise RuntimeError("V11.11.2: seção de Oportunidades não encontrada")
-        form = re.search(r'<div[^>]*class=["\']form["\'][^>]*>', html[section.end():], flags=re.IGNORECASE)
+            raise RuntimeError("V11.11.5: seção de Oportunidades não encontrada")
+        form = re.search(
+            r'<div[^>]*class=["\']form["\'][^>]*>',
+            html[section.end():],
+            flags=re.IGNORECASE,
+        )
         pos = section.end() + (form.start() if form else 0)
         html = html[:pos] + "\n" + block + html[pos:]
         location = "dentro da seção de Oportunidades"
+
+    # O helper fica no fim do HTML para substituir a função global jsonFetch
+    # depois que o script original a declarou.
+    if "window.ofertaFormatError" not in html:
+        body = html.lower().rfind("</body>")
+        if body >= 0:
+            html = html[:body] + _ERROR_HELPER + "\n" + html[body:]
+        else:
+            html += "\n" + _ERROR_HELPER
 
     app.HTML = html
 
@@ -85,10 +125,10 @@ def install(app):
     selector = app.HTML.find('id="oferta-market-filter"')
     niche = app.HTML.find('id="opportunityNiche"')
     if count != 1:
-        raise RuntimeError(f"V11.11.2: seletor duplicado/ausente: {count}")
+        raise RuntimeError(f"V11.11.5: seletor duplicado/ausente: {count}")
     if opportunity < 0 or selector < opportunity:
-        raise RuntimeError("V11.11.2: seletor não ficou na seção de Oportunidades")
+        raise RuntimeError("V11.11.5: seletor não ficou na seção de Oportunidades")
     if niche >= 0 and selector > niche:
-        raise RuntimeError("V11.11.2: seletor não ficou antes dos campos de Oportunidades")
+        raise RuntimeError("V11.11.5: seletor não ficou antes dos campos de Oportunidades")
 
-    print(f"[V11.11.2] seletor Marketplace garantido {location} | único e dentro de Oportunidades", flush=True)
+    print(f"[V11.11.5] seletor Marketplace + diagnóstico de erro legível | {location}", flush=True)
