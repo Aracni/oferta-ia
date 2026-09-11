@@ -1,18 +1,13 @@
 """V11.10.14 — correção estrutural final da UI de Marketplace.
 
-O patch V11.10.13 validava a presença do seletor no HTML, mas o log mostrou
-que a âncora opportunityNiche não foi encontrada naquele momento e o seletor
-acabou no fallback antes de </body>. Este módulo apenas move o seletor já
-existente para dentro do formulário de Oportunidades. Não usa middleware,
-MutationObserver, polling ou alteração de rota.
+Move o seletor já criado para dentro do formulário de Oportunidades. Não usa
+middleware, MutationObserver, polling ou alteração da rota.
 """
 import re
 
 
 def install(app):
-    global HTML
-
-    html = globals().get("HTML")
+    html = getattr(app, "HTML", None)
     if not isinstance(html, str):
         raise RuntimeError("V11.10.14: HTML da aplicação não encontrado")
 
@@ -26,9 +21,6 @@ def install(app):
     block = match.group(0).strip() + "\n"
     html = html[:match.start()] + html[match.end():]
 
-    # Primeiro tentamos a âncora exata do campo. Mantemos variantes com aspas
-    # simples/duplas e uma busca estrutural dentro da seção para sobreviver a
-    # pequenas mudanças de formatação do HTML congelado.
     anchors = [
         r'<input\s+id=["\']opportunityNiche["\'][^>]*>',
         r'<input[^>]*\bid=["\']opportunityNiche["\'][^>]*>',
@@ -43,8 +35,6 @@ def install(app):
         html = html[:anchor.start()] + block + html[anchor.start():]
         location = "antes de opportunityNiche"
     else:
-        # Fallback estrutural: localiza a seção de Oportunidades e seu primeiro
-        # formulário, em vez de jogar o seletor no final do documento.
         section = re.search(
             r'<section[^>]*id=["\']opportunitySection["\'][^>]*>[\s\S]*?<div[^>]*class=["\']form["\'][^>]*>',
             html,
@@ -56,12 +46,12 @@ def install(app):
         html = html[:pos] + "\n" + block + html[pos:]
         location = "dentro do formulário de Oportunidades"
 
-    HTML = html
+    app.HTML = html
 
-    count = HTML.count('id="oferta-market-filter"')
-    niche = HTML.find('id="opportunityNiche"')
-    selector = HTML.find('id="oferta-market-filter"')
-    opportunity = HTML.find('id="opportunitySection"')
+    count = app.HTML.count('id="oferta-market-filter"')
+    niche = app.HTML.find('id="opportunityNiche"')
+    selector = app.HTML.find('id="oferta-market-filter"')
+    opportunity = app.HTML.find('id="opportunitySection"')
     if count != 1:
         raise RuntimeError(f"V11.10.14: seletor duplicado/ausente: {count}")
     if niche < 0 or opportunity < 0 or selector < opportunity:
