@@ -2,6 +2,7 @@
 import os
 import time
 import urllib.request
+from fastapi.responses import JSONResponse
 import app as oferta_app
 import v106_patch
 
@@ -53,6 +54,17 @@ try:
     print("[BOOT] UI V11.11.5 instalada", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] UI não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+# Health check mínimo: não toca em Supabase, Mercado Livre, Shopee ou no núcleo.
+# Serve para distinguir processo vivo de aplicação sem instância saudável.
+try:
+    if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
+        @oferta_app.app.get("/healthz", include_in_schema=False)
+        async def _oferta_healthz():
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.9"})
+    print("[HEALTH] /healthz registrado", flush=True)
+except Exception as exc:
+    print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
 print('[V11.11.9] boot resiliente; rota central reconstruída uma única vez', flush=True)
 
