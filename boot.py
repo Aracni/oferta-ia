@@ -17,7 +17,7 @@ import meli_fast
 meli_fast.install(oferta_app.app)
 
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
-_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/a010c12409bf32d2b9f57a018aa081e88177e1fa/ml_sales_fallback_v4.py"
+_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c15fd751f27e9412c4d392f2b7e7f170de221a3c/ml_sales_fallback_v4.py"
 
 
 def _load_patch(url):
@@ -43,7 +43,7 @@ except Exception as exc:
 try:
     sales_patch = _load_patch(_PATCH_SALES)
     exec(compile(sales_patch, _PATCH_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] fallback de vendas V11.11.8 carregado", flush=True)
+    print("[BOOT] fallback de vendas V11.11.9 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] fallback de vendas não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
@@ -54,7 +54,7 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] UI não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-print('[V11.11.8] boot resiliente; BODY JSON preservado no fallback de vendas', flush=True)
+print('[V11.11.9] boot resiliente; rota central reconstruída uma única vez', flush=True)
 
 import uvicorn
 
