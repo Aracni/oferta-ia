@@ -16,7 +16,7 @@ meli_fast.install(oferta_app.app)
 
 # A interface Marketplace é montada diretamente no HTML pelo patch de
 # enriquecimento. Não interceptamos nem reconstruímos a rota /.
-print('[V11.10.13] boot estável; sem wrapper ASGI da rota raiz', flush=True)
+print('[V11.10.13] boot estável; commit de implantação=5c89abb82e6bb4f6f5148961380673ee786233ab', flush=True)
 
 import uvicorn
 
