@@ -14,9 +14,12 @@ meli_auto.install(oferta_app.app)
 import meli_fast
 meli_fast.install(oferta_app.app)
 
-# A interface Marketplace é montada diretamente no HTML pelo patch de
-# enriquecimento. Não interceptamos nem reconstruímos a rota /.
-print('[V11.10.13] boot estável; commit de implantação=5c89abb82e6bb4f6f5148961380673ee786233ab', flush=True)
+# Última etapa da UI: move o seletor já existente para dentro do formulário
+# de Oportunidades, sem middleware nem alteração da rota raiz.
+import ui_fix
+ui_fix.install(oferta_app)
+
+print('[V11.10.14] boot estável; correção estrutural da UI ativa', flush=True)
 
 import uvicorn
 
