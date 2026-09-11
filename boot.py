@@ -19,7 +19,7 @@ meli_fast.install(oferta_app.app)
 import ui_fix
 ui_fix.install(oferta_app)
 
-print('[V11.10.14] boot estável; correção estrutural da UI ativa', flush=True)
+print('[V11.11] boot estável; enriquecimento ML V11.11 + UI Marketplace ativa', flush=True)
 
 import uvicorn
 
