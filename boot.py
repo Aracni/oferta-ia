@@ -18,6 +18,7 @@ meli_fast.install(oferta_app.app)
 
 # O enriquecimento V11.11 entra DEPOIS dos instaladores de rota.
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/92da273dcba371aaa29752a12f87355229bc48b3/ml_enrichment_v3.py"
+_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/4d289f5d10dee4284b3199a28789d9e121522b50/ml_sales_fallback_v4.py"
 
 def _load_patch(url):
     last_error = None
@@ -29,15 +30,19 @@ def _load_patch(url):
             last_error = exc
             if attempt < 2:
                 time.sleep(1.0 * (attempt + 1))
-    raise RuntimeError(f"Não foi possível carregar o patch V11.11: {last_error}") from last_error
+    raise RuntimeError(f"Não foi possível carregar patch do OFERTA IA: {last_error}") from last_error
 
 patch = _load_patch(_PATCH)
 exec(compile(patch, _PATCH, "exec"), oferta_app.__dict__, oferta_app.__dict__)
 
+# V11.11.4: se /products/{id} não trouxer sold_quantity, usa /products/{id}/items.
+sales_patch = _load_patch(_PATCH_SALES)
+exec(compile(sales_patch, _PATCH_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+
 import ui_fix
 ui_fix.install(oferta_app)
 
-print('[V11.11.3] boot estável; enriquecimento ML instalado após todas as rotas-base', flush=True)
+print('[V11.11.4] boot estável; enriquecimento ML + fallback de vendas instalados', flush=True)
 
 import uvicorn
 
