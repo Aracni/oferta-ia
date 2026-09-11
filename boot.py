@@ -15,9 +15,8 @@ meli_auto.install(oferta_app.app)
 import meli_fast
 meli_fast.install(oferta_app.app)
 
-# V11.10.5 — última camada, depois de TODOS os patches.
-# O seletor é inserido na resposta HTTP do / para garantir que nenhuma
-# alteração posterior de app.HTML consiga removê-lo antes do navegador receber a página.
+# V11.10.6 — última camada, depois de TODOS os patches.
+# O seletor é inserido na resposta HTTP final do /.
 _MARKET_UI_FINAL = r'''<style>
 #oferta-market-filter{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px;padding:10px;border:1px solid #e4e7ec;border-radius:12px;background:#f8fafc;align-items:center;width:100%;box-sizing:border-box}
 #oferta-market-filter .market-title{font-weight:800;margin-right:3px}
@@ -73,8 +72,12 @@ _MARKET_UI_FINAL = r'''<style>
 
 
 def _finalize_home_response(original):
-    def endpoint(*args, **kwargs):
-        response = original(*args, **kwargs)
+    # Importante: o wrapper recebe apenas Request. Usar *args/**kwargs faz o
+    # FastAPI interpretar args e kwargs como parâmetros de query obrigatórios.
+    from fastapi import Request
+
+    def endpoint(request: Request):
+        response = original()
         try:
             from fastapi.responses import HTMLResponse
             if isinstance(response, HTMLResponse):
@@ -84,31 +87,31 @@ def _finalize_home_response(original):
                     if anchor:
                         body = body[:anchor.start()] + _MARKET_UI_FINAL + '\n    ' + body[anchor.start():]
                         response = HTMLResponse(content=body, status_code=response.status_code, headers=dict(response.headers), media_type="text/html")
-                        print("[V11.10.5] seletor Marketplace injetado na resposta final /", flush=True)
+                        print("[V11.10.6] seletor Marketplace injetado na resposta final /", flush=True)
                     else:
-                        print("[V11.10.5] ERRO: anchor opportunityNiche nao encontrado na resposta /", flush=True)
+                        print("[V11.10.6] ERRO: anchor opportunityNiche nao encontrado na resposta /", flush=True)
                 else:
-                    print("[V11.10.5] seletor Marketplace confirmado na resposta final /", flush=True)
+                    print("[V11.10.6] seletor Marketplace confirmado na resposta final /", flush=True)
         except Exception as exc:
-            print(f"[V11.10.5] falha controlada no /: {exc}", flush=True)
+            print(f"[V11.10.6] falha controlada no /: {exc}", flush=True)
         return response
-    endpoint._v11105_final_home = True
+    endpoint._v11106_final_home = True
     return endpoint
 
 try:
     from fastapi.dependencies.utils import get_dependant
     from fastapi.routing import request_response
     for _route in getattr(oferta_app.app, "routes", []):
-        if getattr(_route, "path", None) == "/" and not getattr(_route.endpoint, "_v11105_final_home", False):
+        if getattr(_route, "path", None) == "/" and not getattr(_route.endpoint, "_v11106_final_home", False):
             _original_home = _route.endpoint
             _final_home = _finalize_home_response(_original_home)
             _route.endpoint = _final_home
             _route.dependant = get_dependant(path=_route.path, call=_final_home)
             _route.app = request_response(_route.get_route_handler())
-            print("[V11.10.5] endpoint / reconstruido com injecao final do seletor", flush=True)
+            print("[V11.10.6] endpoint / reconstruido com assinatura FastAPI correta", flush=True)
             break
 except Exception as exc:
-    print(f"[V11.10.5] falha ao reconstruir endpoint /: {exc}", flush=True)
+    print(f"[V11.10.6] falha ao reconstruir endpoint /: {exc}", flush=True)
 
 import uvicorn
 
