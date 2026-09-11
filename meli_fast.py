@@ -1,40 +1,42 @@
-"""V10.10 — Mercado Livre rápido e tolerante a endpoints bloqueados."""
-import threading
+"""V11.10 — Mercado Livre rápido e tolerante a endpoints bloqueados.
+
+O orçamento de chamadas é por requisição, usando contextvars, para que duas
+buscas simultâneas não compartilhem nem resetem o orçamento uma da outra.
+"""
+import contextvars
 
 _INSTALLED = False
 _ORIGINAL_GET_ITEM = None
 _ORIGINAL_FETCH_JSON = None
-_LOCK = threading.Lock()
-_ITEM_CALLS = 0
-_GLOBAL_ACTIVE = False
+_ACTIVE = contextvars.ContextVar("oferta_meli_active", default=False)
+_ITEM_CALLS = contextvars.ContextVar("oferta_meli_item_calls", default=0)
 MAX_ITEM_DETAIL_CALLS = 8
 ITEM_TIMEOUT = 3.0
 
 
 def _reset_budget(active=False):
-    global _ITEM_CALLS, _GLOBAL_ACTIVE
-    with _LOCK:
-        _ITEM_CALLS = 0
-        _GLOBAL_ACTIVE = active
+    _ACTIVE.set(active)
+    _ITEM_CALLS.set(0)
 
 
 def _reserve_item_call():
-    global _ITEM_CALLS
-    with _LOCK:
-        if _ITEM_CALLS >= MAX_ITEM_DETAIL_CALLS:
-            return False
-        _ITEM_CALLS += 1
-        return True
+    count = int(_ITEM_CALLS.get() or 0)
+    if count >= MAX_ITEM_DETAIL_CALLS:
+        return False
+    _ITEM_CALLS.set(count + 1)
+    return True
 
 
 async def _asgi(scope, receive, send, original):
     if scope.get("type") != "http" or scope.get("path") != "/api/opportunities-central":
         return await original(scope, receive, send)
-    _reset_budget(True)
+    token_active = _ACTIVE.set(True)
+    token_calls = _ITEM_CALLS.set(0)
     try:
         return await original(scope, receive, send)
     finally:
-        _reset_budget(False)
+        _ACTIVE.reset(token_active)
+        _ITEM_CALLS.reset(token_calls)
 
 
 def install(app):
@@ -48,9 +50,7 @@ def install(app):
         _ORIGINAL_GET_ITEM = module._v9_get_item
 
         def guarded_get_item(token, item_id):
-            with _LOCK:
-                active = _GLOBAL_ACTIVE
-            if active and not _reserve_item_call():
+            if _ACTIVE.get() and not _reserve_item_call():
                 return None
             return _ORIGINAL_GET_ITEM(token, item_id)
 
@@ -60,9 +60,7 @@ def install(app):
         _ORIGINAL_FETCH_JSON = module._v9_fetch_json
 
         def guarded_fetch(token, url, params=None, timeout=10, trace=None, stage="HTTP"):
-            with _LOCK:
-                active = _GLOBAL_ACTIVE
-            if active and isinstance(url, str):
+            if _ACTIVE.get() and isinstance(url, str):
                 if "/user-products/" in url:
                     return None, 403
                 if "/items/" in url:
@@ -82,5 +80,5 @@ def install(app):
             break
 
     _INSTALLED = True
-    print(f"[V10.10] Mercado Livre rápido ativo | max_items={MAX_ITEM_DETAIL_CALLS} timeout={ITEM_TIMEOUT}s")
+    print(f"[V11.10] Mercado Livre rápido ativo | max_items={MAX_ITEM_DETAIL_CALLS} timeout={ITEM_TIMEOUT}s | orçamento por requisição", flush=True)
     return app
