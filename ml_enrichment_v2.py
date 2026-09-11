@@ -1,14 +1,14 @@
-"""OFERTA IA V11.10.2 — patch de enriquecimento do Mercado Livre.
+"""OFERTA IA V11.10.11 — patch de enriquecimento do Mercado Livre.
 
-Corrige um problema da V11.10.1: o índice de catálogo pode conter um resumo
-sem sold_quantity. Nesse caso, busca novamente /products/{product_id}, cuja
-resposta oficial traz sold_quantity no produto e no buy_box_winner.
-Também interrompe tentativas repetidas no endpoint de reviews quando o token
-atual recebe 403, sem fabricar avaliação.
+Mantém o enriquecimento V11.10.2 e fixa o seletor de marketplace
+estruturalmente dentro do formulário de Oportunidades, imediatamente antes
+do campo opportunityNiche. Não usa middleware, MutationObserver ou wrapper
+ASGI para a interface.
 """
 import math
 import time
 import urllib.request
+import re
 
 _V1120_PRODUCT_CACHE = {}
 _V1120_PRODUCT_TTL = 300
@@ -43,12 +43,7 @@ def _v1120_product(pid, token):
         return cached
     product = None
     try:
-        data, status = _v11_fetch_json(
-            token,
-            f"https://api.mercadolibre.com/products/{pid}",
-            timeout=8,
-            stage="CATALOG",
-        )
+        data, status = _v11_fetch_json(token, f"https://api.mercadolibre.com/products/{pid}", timeout=8, stage="CATALOG")
         if isinstance(data, dict) and status and 200 <= int(status) < 300:
             product = data
             try:
@@ -73,8 +68,6 @@ def _v1120_sold(product, winner, row, item):
 
 
 def _v1120_rating(row, item):
-    # Só usa uma avaliação real já presente nos dados; não transforma
-    # reputação do vendedor em avaliação do produto.
     for obj in (row, item):
         if not isinstance(obj, dict):
             continue
@@ -96,22 +89,13 @@ def _v1120_enrich_ml(items):
     for original in list(items or []):
         item = dict(original or {})
         row = _v119_row(item)
-        pid = str(
-            item.get("catalog_product_id")
-            or item.get("product_id")
-            or row.get("product_id")
-            or ""
-        ).upper()
-
-        # Importante: não confia no índice resumido para vendas. Busca o
-        # /products/{id} oficial para obter sold_quantity atualizado.
+        pid = str(item.get("catalog_product_id") or item.get("product_id") or row.get("product_id") or "").upper()
         product = _v1120_product(pid, token) if token and pid else None
         winner = product.get("buy_box_winner") if isinstance(product, dict) else None
         winner = winner if isinstance(winner, dict) else {}
 
         sold = _v1120_sold(product, winner, row, item)
         rating = _v1120_rating(row, item)
-
         current = _v1120_num(item.get("current_price"))
         if current is None:
             current = _v1120_num(winner.get("price"))
@@ -137,9 +121,7 @@ def _v1120_enrich_ml(items):
             item["sold_quantity"] = int(sold)
             item["sales"] = int(sold)
             item["sales_count"] = int(sold)
-            item["demand_index"] = round(
-                min(100.0, math.log1p(max(0, sold)) / math.log1p(10000) * 100.0), 2
-            )
+            item["demand_index"] = round(min(100.0, math.log1p(max(0, sold)) / math.log1p(10000) * 100.0), 2)
         else:
             item["demand_index"] = None
 
@@ -147,16 +129,10 @@ def _v1120_enrich_ml(items):
             item["rating"] = rating
             item["rating_score"] = round(rating / 5.0 * 100.0, 2)
 
-        # Reviews: o token atual está recebendo 403/UNAUTHORIZED. Não fazemos
-        # 10 chamadas inúteis por garimpo e não inventamos rating/reviews.
-        if _V1120_REVIEWS_BLOCKED:
-            pass
-
         available = sum(x is not None for x in (sold, rating, discount, current))
         item["data_confidence"] = "alta" if available >= 4 else "média" if available >= 2 else "baixa"
         item["confidence"] = item["data_confidence"]
         item["score_provisional"] = sold is None or rating is None
-
         item.setdefault("commission_rate", None)
         item.setdefault("commission_value", None)
         item.setdefault("earnings", None)
@@ -175,21 +151,15 @@ def _v1120_enrich_ml(items):
         if signals:
             total = sum(w for _, w in signals)
             fresh = sum(v * w for v, w in signals) / total
-            item["opportunity_score"] = round(
-                (old_score * 0.35 + fresh * 0.65) if old_score is not None else fresh,
-                2,
-            )
-
+            item["opportunity_score"] = round((old_score * 0.35 + fresh * 0.65) if old_score is not None else fresh, 2)
         enriched.append(item)
     return enriched
 
 
 _v119_enrich_ml = _v1120_enrich_ml
 
-# Substitui o seletor V11.9 por radio buttons, mantendo exatamente um modo
-# selecionado e persistência local. Sem MutationObserver/intervalos.
-try:
-    _V1120_UI = r'''<style>
+# UI única e estrutural. Ela é sempre reconstruída no ponto exato do formulário.
+_V1120_UI = r'''<style>
 #oferta-market-filter{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px;padding:10px;border:1px solid #e4e7ec;border-radius:12px;background:#f8fafc;align-items:center;width:100%;box-sizing:border-box}
 #oferta-market-filter .market-title{font-weight:800;margin-right:3px}
 #oferta-market-filter label{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:1px solid #d0d5dd;border-radius:9px;cursor:pointer;user-select:none;background:#fff;font-size:13px}
@@ -204,49 +174,35 @@ try:
 </div>
 <script>
 (function(){
-  var box=document.getElementById('oferta-market-filter');
-  if(!box)return;
+  var box=document.getElementById('oferta-market-filter'); if(!box)return;
   var radios=box.querySelectorAll('input[name="oferta_marketplace"]');
-  function selected(){
-    for(var i=0;i<radios.length;i++) if(radios[i].checked) return radios[i].value;
-    return 'both';
-  }
-  function paint(){
-    for(var i=0;i<radios.length;i++){
-      var label=radios[i].parentElement;
-      if(label) label.classList.toggle('active',radios[i].checked);
-    }
-  }
-  var saved=null;
-  try{saved=localStorage.getItem('oferta_ia_marketplace')}catch(e){}
-  if(saved){
-    for(var i=0;i<radios.length;i++) radios[i].checked=(radios[i].value===saved);
-  }
-  for(var i=0;i<radios.length;i++) radios[i].addEventListener('change',function(){
-    paint();
-    try{localStorage.setItem('oferta_ia_marketplace',selected())}catch(e){}
-  });
+  function selected(){for(var i=0;i<radios.length;i++)if(radios[i].checked)return radios[i].value;return 'both';}
+  function paint(){for(var i=0;i<radios.length;i++){var label=radios[i].parentElement;if(label)label.classList.toggle('active',radios[i].checked);}}
+  var saved=null; try{saved=localStorage.getItem('oferta_ia_marketplace')}catch(e){}
+  if(saved){for(var i=0;i<radios.length;i++)radios[i].checked=(radios[i].value===saved);}
+  for(var i=0;i<radios.length;i++)radios[i].addEventListener('change',function(){paint();try{localStorage.setItem('oferta_ia_marketplace',selected())}catch(e){}});
   paint();
   var originalFetch=window.fetch;
   window.fetch=function(input,init){
-    try{
-      var url=typeof input==='string'?input:(input&&input.url)||'';
-      if(url.indexOf('/api/opportunities-central')!==-1 && init && typeof init.body==='string'){
-        var body=JSON.parse(init.body);
-        body.marketplaces=selected();
-        init=Object.assign({},init,{body:JSON.stringify(body)});
-      }
-    }catch(e){}
+    try{var url=typeof input==='string'?input:(input&&input.url)||'';if(url.indexOf('/api/opportunities-central')!==-1&&init&&typeof init.body==='string'){var body=JSON.parse(init.body);body.marketplaces=selected();init=Object.assign({},init,{body:JSON.stringify(body)});}}catch(e){}
     return originalFetch.call(this,input,init);
   };
 })();
 </script>'''
-    if 'id="oferta-market-filter"' in HTML:
-        import re
-        HTML = re.sub(r'<style>\s*#oferta-market-filter[\s\S]*?</script>', _V1120_UI, HTML, count=1)
+
+try:
+    # Remove any old selector block, then put exactly one copy before opportunityNiche.
+    HTML = re.sub(r'<style>\s*#oferta-market-filter[\s\S]*?</script>\s*', '', HTML, count=1)
+    anchor = re.search(r'<input\s+id="opportunityNiche"\b[^>]*>', HTML)
+    if anchor:
+        HTML = HTML[:anchor.start()] + _V1120_UI + '\n' + HTML[anchor.start():]
+        print('[V11.10.11] seletor fixado diretamente antes de opportunityNiche', flush=True)
     elif '</body>' in HTML:
         HTML = HTML.replace('</body>', _V1120_UI + '</body>', 1)
+        print('[V11.10.11] seletor inserido antes de </body> (fallback)', flush=True)
+    else:
+        print('[V11.10.11] ERRO: âncora opportunityNiche não encontrada', flush=True)
 except Exception as exc:
-    print(f"[V11.10.2] UI seletor não aplicada: {exc}", flush=True)
+    print(f'[V11.10.11] falha controlada na UI: {exc}', flush=True)
 
-print("[V11.10.2] vendas ML via /products/{id} fresco; reviews 403 isolado; seletor preservado", flush=True)
+print('[V11.10.11] vendas ML via /products/{id}; seletor estrutural ativo', flush=True)
