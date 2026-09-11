@@ -1,7 +1,8 @@
-"""OFERTA IA V11.11.3 — enriquecimento confiável do Mercado Livre."""
+"""OFERTA IA V11.11.6 — enriquecimento confiável do Mercado Livre."""
 import math
 import time
 import urllib.parse
+from fastapi import Body
 
 _V111_PRODUCT_CACHE = {}
 _V111_REVIEWS_CACHE = {}
@@ -217,7 +218,7 @@ def _v111_enrich_ml(items):
         item["earnings"] = None
         item["commission_source"] = "não disponível no catálogo público"
         item["opportunity_score"] = _v111_score(item, sold, rating, discount)
-        item["enrichment_version"] = "V11.11.3"
+        item["enrichment_version"] = "V11.11.6"
         enriched.append(item)
     return enriched
 
@@ -226,7 +227,7 @@ _v119_enrich_ml = _v111_enrich_ml
 _original_central = _v119_central
 
 
-def _v111_central(payload: dict):
+def _v111_central(payload: dict = Body(default={} )):
     try:
         result = _original_central(payload)
         if not isinstance(result, dict):
@@ -262,10 +263,6 @@ for _route in getattr(app, "routes", []):
             from fastapi.routing import request_response
             _route.dependant = get_dependant(path=_route.path, call=_v111_central)
             _base_route_app = request_response(_route.get_route_handler())
-
-            # Recria o adaptador ASGI depois de trocar o endpoint. O V10.8
-            # havia criado o route.app anteriormente, então apenas trocar
-            # endpoint/dependant não seria suficiente.
             try:
                 import meli_fast as _meli_fast
                 async def _v111_route_app(scope, receive, send, _original=_base_route_app):
@@ -273,9 +270,9 @@ for _route in getattr(app, "routes", []):
                 _route.app = _v111_route_app
             except Exception:
                 _route.app = _base_route_app
-            print("[V11.11.3] rota central reconstruída com endpoint V11.11", flush=True)
+            print("[V11.11.6] rota central reconstruída com BODY JSON + endpoint V11.11", flush=True)
         except Exception as exc:
-            print(f"[V11.11.3][ERRO] reconstrução da rota: {type(exc).__name__}: {str(exc)[:500]}", flush=True)
+            print(f"[V11.11.6][ERRO] reconstrução da rota: {type(exc).__name__}: {str(exc)[:500]}", flush=True)
         break
 
-print("[V11.11.3] enriquecimento ML ativo | /products + reviews | rota central reconstruída | comissão não inventada", flush=True)
+print("[V11.11.6] enriquecimento ML ativo | /products + reviews | BODY JSON corrigido | comissão não inventada", flush=True)
