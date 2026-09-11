@@ -14,9 +14,9 @@ meli_auto.install(oferta_app.app)
 import meli_fast
 meli_fast.install(oferta_app.app)
 
-# A interface Marketplace agora é montada diretamente no HTML pelo
-# ml_enrichment_v2.py. Não interceptamos nem reconstruímos a rota /.
-print('[V11.10.11] boot estável; sem wrapper ASGI da rota raiz', flush=True)
+# A interface Marketplace é montada diretamente no HTML pelo patch de
+# enriquecimento. Não interceptamos nem reconstruímos a rota /.
+print('[V11.10.13] boot estável; sem wrapper ASGI da rota raiz', flush=True)
 
 import uvicorn
 
