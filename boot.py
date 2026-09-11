@@ -1,4 +1,4 @@
-"""Inicialização explícita do OFERTA IA."""
+"""Inicialização explícita do OFERTA IA — boot resiliente."""
 import os
 import time
 import urllib.request
@@ -16,9 +16,9 @@ meli_auto.install(oferta_app.app)
 import meli_fast
 meli_fast.install(oferta_app.app)
 
-# O enriquecimento V11.11 entra DEPOIS dos instaladores de rota.
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/4b17048fcca94eba2d3c6da548ae60108950a518/ml_sales_fallback_v4.py"
+
 
 def _load_patch(url):
     last_error = None
@@ -32,17 +32,32 @@ def _load_patch(url):
                 time.sleep(1.0 * (attempt + 1))
     raise RuntimeError(f"Não foi possível carregar patch do OFERTA IA: {last_error}") from last_error
 
-patch = _load_patch(_PATCH)
-exec(compile(patch, _PATCH, "exec"), oferta_app.__dict__, oferta_app.__dict__)
 
-# V11.11.4: se /products/{id} não trouxer sold_quantity, usa /products/{id}/items.
-sales_patch = _load_patch(_PATCH_SALES)
-exec(compile(sales_patch, _PATCH_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+# O enriquecimento é importante, mas não pode derrubar o serviço inteiro.
+try:
+    patch = _load_patch(_PATCH)
+    exec(compile(patch, _PATCH, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] V11.11.6 carregado", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] V11.11.6 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-import ui_fix
-ui_fix.install(oferta_app)
+# Fallback de vendas: opcional. Se falhar, o núcleo continua disponível.
+try:
+    sales_patch = _load_patch(_PATCH_SALES)
+    exec(compile(sales_patch, _PATCH_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] fallback de vendas V11.11.4 carregado", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] fallback de vendas não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-print('[V11.11.6] boot estável; endpoint central BODY JSON + enriquecimento ML + fallback de vendas', flush=True)
+# UI também não pode impedir o servidor de subir.
+try:
+    import ui_fix
+    ui_fix.install(oferta_app)
+    print("[BOOT] UI V11.11.5 instalada", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] UI não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+print('[V11.11.7] boot resiliente; falhas de patches não derrubam o servidor', flush=True)
 
 import uvicorn
 
