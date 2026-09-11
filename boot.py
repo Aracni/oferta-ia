@@ -16,9 +16,8 @@ meli_auto.install(oferta_app.app)
 import meli_fast
 meli_fast.install(oferta_app.app)
 
-# O enriquecimento V11.11 precisa entrar DEPOIS dos instaladores de rota
-# (meli_auto/meli_fast), para que /api/opportunities-central não seja sobrescrita.
-_PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/e2573b00c684cca600cfc05c2590b8e83e0ded8e/ml_enrichment_v3.py"
+# O enriquecimento V11.11 entra DEPOIS dos instaladores de rota.
+_PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/92da273dcba371aaa29752a12f87355229bc48b3/ml_enrichment_v3.py"
 
 def _load_patch(url):
     last_error = None
@@ -35,12 +34,10 @@ def _load_patch(url):
 patch = _load_patch(_PATCH)
 exec(compile(patch, _PATCH, "exec"), oferta_app.__dict__, oferta_app.__dict__)
 
-# Última etapa da UI: move o seletor já existente para dentro do formulário
-# de Oportunidades, sem middleware nem alteração da rota raiz.
 import ui_fix
 ui_fix.install(oferta_app)
 
-print('[V11.11.1] boot estável; enriquecimento ML instalado após todas as rotas-base', flush=True)
+print('[V11.11.3] boot estável; enriquecimento ML instalado após todas as rotas-base', flush=True)
 
 import uvicorn
 
