@@ -1,7 +1,8 @@
-"""OFERTA IA V11.10.3.
-Preserva o patch de enriquecimento ML e restaura o seletor Marketplace por injeção estática segura.
+"""OFERTA IA V11.10.4.
+Preserva o patch de enriquecimento ML e injeta o seletor Marketplace em uma âncora estrutural estável.
 """
 import urllib.request
+import re
 
 _BASE = "https://raw.githubusercontent.com/Aracni/oferta-ia/639b53c7e97152b2756e70eef2940454ae3420d7/app.py"
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/c18c26a11794b66e037b8c78cbdc207ab83c9559/ml_enrichment_v2.py"
@@ -22,9 +23,8 @@ except Exception as exc:
 
 exec(compile(patch, _PATCH, "exec"), globals(), globals())
 
-# RESTAURAÇÃO SEGURA DO SELETOR:
-# O núcleo V11.9 não contém um </body> confiável para injeção. Portanto,
-# inserimos o seletor diretamente antes do campo de nicho da seção Oportunidades.
+# SELETOR MARKETPLACE — inserção estrutural no formulário de Oportunidades.
+# Não depende de </body>, MutationObserver ou intervalos.
 try:
     _MARKET_UI = r'''<style>
 #oferta-market-filter{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px;padding:10px;border:1px solid #e4e7ec;border-radius:12px;background:#f8fafc;align-items:center;width:100%;box-sizing:border-box}
@@ -78,15 +78,19 @@ try:
   };
 })();
 </script>'''
-    _MARKET_ANCHOR = '<div class="input-row">\n      <input id="opportunityNiche"'
-    if 'id="oferta-market-filter"' not in HTML and _MARKET_ANCHOR in HTML:
-        HTML = HTML.replace(_MARKET_ANCHOR, _MARKET_UI + '\n    <div class="input-row">\n      <input id="opportunityNiche"', 1)
-        print('[V11.10.3] seletor Marketplace inserido no formulário de Oportunidades', flush=True)
-    elif 'id="oferta-market-filter"' in HTML:
-        print('[V11.10.3] seletor Marketplace já presente; nenhuma duplicação feita', flush=True)
-    else:
-        print('[V11.10.3] âncora do formulário não encontrada; seletor não duplicado', flush=True)
-except Exception as exc:
-    print(f'[V11.10.3] falha controlada ao inserir seletor: {exc}', flush=True)
 
-print('[V11.10.3] seletor Marketplace preservado por injeção estática + enriquecimento ML', flush=True)
+    if 'id="oferta-market-filter"' not in HTML:
+        # Aceita qualquer indentação e qualquer atributo adicional no input.
+        _pattern = r'(<input\s+id="opportunityNiche"\b[^>]*>)'
+        _match = re.search(_pattern, HTML)
+        if _match:
+            HTML = HTML[:_match.start()] + _MARKET_UI + '\n    ' + HTML[_match.start():]
+            print('[V11.10.4] seletor Marketplace inserido antes de opportunityNiche', flush=True)
+        else:
+            print('[V11.10.4] ERRO: input opportunityNiche não encontrado; seletor não inserido', flush=True)
+    else:
+        print('[V11.10.4] seletor Marketplace já presente; nenhuma duplicação', flush=True)
+except Exception as exc:
+    print(f'[V11.10.4] falha controlada ao inserir seletor: {exc}', flush=True)
+
+print('[V11.10.4] seletor Marketplace + enriquecimento ML ativos', flush=True)
