@@ -17,7 +17,7 @@ import meli_fast
 meli_fast.install(oferta_app.app)
 
 # O enriquecimento V11.11 entra DEPOIS dos instaladores de rota.
-_PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/92da273dcba371aaa29752a12f87355229bc48b3/ml_enrichment_v3.py"
+_PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/4b17048fcca94eba2d3c6da548ae60108950a518/ml_sales_fallback_v4.py"
 
 def _load_patch(url):
@@ -42,7 +42,7 @@ exec(compile(sales_patch, _PATCH_SALES, "exec"), oferta_app.__dict__, oferta_app
 import ui_fix
 ui_fix.install(oferta_app)
 
-print('[V11.11.4] boot estável; enriquecimento ML + fallback de vendas instalados', flush=True)
+print('[V11.11.6] boot estável; endpoint central BODY JSON + enriquecimento ML + fallback de vendas', flush=True)
 
 import uvicorn
 
