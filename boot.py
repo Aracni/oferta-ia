@@ -3,6 +3,7 @@ import os
 import time
 import urllib.request
 from fastapi.responses import JSONResponse
+from starlette.requests import Request
 import app as oferta_app
 import v106_patch
 
@@ -65,6 +66,39 @@ try:
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+
+# Diagnóstico de borda: Render recomenda registrar CF-Ray e Rndr-Id
+# para distinguir requisições que chegaram ao FastAPI das que falharam antes dele.
+# Não altera respostas nem lógica de negócio.
+try:
+    @oferta_app.app.middleware("http")
+    async def _oferta_edge_trace(request: Request, call_next):
+        cf_ray = request.headers.get("cf-ray", "-")
+        rndr_id = request.headers.get("rndr-id", "-")
+        host = request.headers.get("host", "-")
+        started = time.perf_counter()
+        try:
+            response = await call_next(request)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            print(
+                f"[EDGE_TRACE] {request.method} {request.url.path} "
+                f"status={response.status_code} host={host} cf_ray={cf_ray} "
+                f"rndr_id={rndr_id} elapsed_ms={elapsed_ms}",
+                flush=True,
+            )
+            return response
+        except Exception as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            print(
+                f"[EDGE_TRACE][ERROR] {request.method} {request.url.path} "
+                f"host={host} cf_ray={cf_ray} rndr_id={rndr_id} "
+                f"elapsed_ms={elapsed_ms} error={type(exc).__name__}: {str(exc)[:300]}",
+                flush=True,
+            )
+            raise
+    print("[EDGE_TRACE] rastreamento CF-Ray/Rndr-Id ativo", flush=True)
+except Exception as exc:
+    print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
 print('[V11.11.9] boot resiliente; rota central reconstruída uma única vez', flush=True)
 
