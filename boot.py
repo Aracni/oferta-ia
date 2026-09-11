@@ -15,9 +15,9 @@ meli_auto.install(oferta_app.app)
 import meli_fast
 meli_fast.install(oferta_app.app)
 
-# V11.10.8 — restauração simples e segura do seletor.
-# Não altera nenhuma rota FastAPI. Apenas garante que o HTML final usado pelo
-# endpoint / contenha o mesmo seletor que já funcionou anteriormente.
+# V11.10.8/V11.10.9 — seletor Marketplace.
+# Mantemos a restauração no HTML e, adicionalmente, garantimos a presença
+# na resposta HTTP REAL da rota /, sem reconstruir a rota FastAPI.
 _MARKET_UI = r'''<style>
 #oferta-market-filter{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px;padding:10px;border:1px solid #e4e7ec;border-radius:12px;background:#f8fafc;align-items:center;width:100%;box-sizing:border-box}
 #oferta-market-filter .market-title{font-weight:800;margin-right:3px}
@@ -71,24 +71,78 @@ _MARKET_UI = r'''<style>
 })();
 </script>'''
 
+# Primeiro garante a variável HTML final, como nas versões anteriores.
 try:
     if 'id="oferta-market-filter"' not in oferta_app.HTML:
-        # A posição é dentro do formulário de Oportunidades, imediatamente
-        # antes do campo de nicho, como na versão que já funcionou.
         pattern = r'(<input\s+id="opportunityNiche"\b[^>]*>)'
         match = re.search(pattern, oferta_app.HTML)
         if match:
             oferta_app.HTML = oferta_app.HTML[:match.start()] + _MARKET_UI + '\n    ' + oferta_app.HTML[match.start():]
-            print('[V11.10.8] seletor Marketplace restaurado no HTML final', flush=True)
+            print('[V11.10.9] seletor restaurado no HTML final', flush=True)
         elif '</body>' in oferta_app.HTML:
             oferta_app.HTML = oferta_app.HTML.replace('</body>', _MARKET_UI + '</body>', 1)
-            print('[V11.10.8] seletor Marketplace restaurado antes de </body>', flush=True)
+            print('[V11.10.9] seletor restaurado antes de </body>', flush=True)
         else:
-            print('[V11.10.8] ERRO: não foi possível localizar âncora do seletor', flush=True)
+            print('[V11.10.9] ERRO: âncora HTML não encontrada', flush=True)
     else:
-        print('[V11.10.8] seletor Marketplace já presente no HTML final', flush=True)
+        print('[V11.10.9] seletor já presente no HTML final', flush=True)
 except Exception as exc:
-    print(f'[V11.10.8] falha controlada ao restaurar seletor: {exc}', flush=True)
+    print(f'[V11.10.9] falha controlada no HTML: {exc}', flush=True)
+
+# Segundo: intercepta somente a resposta ASGI real da rota /.
+# Isso evita depender de como o endpoint / foi fechado pelo núcleo original.
+try:
+    async def _market_home_response(scope, receive, send, _original):
+        if scope.get('type') != 'http' or scope.get('path') != '/':
+            return await _original(scope, receive, send)
+
+        messages = []
+        body_parts = []
+
+        async def _capture(message):
+            if message.get('type') == 'http.response.start':
+                messages.append(message)
+                return
+            if message.get('type') == 'http.response.body':
+                body_parts.append(message.get('body', b''))
+                if message.get('more_body', False):
+                    return
+                body = b''.join(body_parts)
+                marker = b'id="oferta-market-filter"'
+                if marker not in body and b'</body>' in body:
+                    ui = _MARKET_UI.encode('utf-8')
+                    body = body.replace(b'</body>', ui + b'</body>', 1)
+                    new_headers = []
+                    for key, value in messages[0].get('headers', []):
+                        if key.lower() == b'content-length':
+                            continue
+                        new_headers.append((key, value))
+                    messages[0]['headers'] = new_headers
+                    print('[V11.10.9] seletor inserido na resposta HTTP real da rota /', flush=True)
+                elif marker in body:
+                    print('[V11.10.9] seletor confirmado na resposta HTTP real da rota /', flush=True)
+                else:
+                    print('[V11.10.9] resposta / sem </body>; seletor não inserido', flush=True)
+                for i, saved in enumerate(messages):
+                    await send(saved)
+                await send({'type':'http.response.body','body':body,'more_body':False})
+                return
+            await send(message)
+
+        return await _original(scope, receive, _capture)
+
+    for _route in getattr(oferta_app.app, 'routes', []):
+        if getattr(_route, 'path', None) == '/' and hasattr(_route, 'app'):
+            if not getattr(_route.app, '_oferta_market_response_v11109', False):
+                _original_home_app = _route.app
+                async def _wrapped_home(scope, receive, send, _original=_original_home_app):
+                    return await _market_home_response(scope, receive, send, _original)
+                _wrapped_home._oferta_market_response_v11109 = True
+                _route.app = _wrapped_home
+                print('[V11.10.9] proteção da resposta HTTP da rota / instalada', flush=True)
+            break
+except Exception as exc:
+    print(f'[V11.10.9] falha controlada no wrapper ASGI da rota /: {exc}', flush=True)
 
 import uvicorn
 
