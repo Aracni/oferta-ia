@@ -14,7 +14,7 @@ def install(app):
     # Captura exatamente o seletor já criado pelo patch anterior, incluindo o
     # script que o acompanha, para poder reposicioná-lo sem duplicação.
     pattern = r'<div id="oferta-market-filter"[\s\S]*?</script>\s*'
-    match = re.search(pattern, html, count=1)
+    match = re.search(pattern, html)
     if not match:
         raise RuntimeError("V11.10.14: seletor oferta-market-filter não encontrado")
 
