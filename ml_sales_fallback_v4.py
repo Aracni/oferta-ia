@@ -1,10 +1,15 @@
-"""V11.11.4 — fallback de vendas do Mercado Livre.
+"""V11.11.8 — fallback de vendas do Mercado Livre.
 
 Complementa o enriquecimento sem inventar dados: quando /products/{id} não
 entrega sold_quantity, consulta /products/{id}/items e procura sold_quantity
 nas ofertas retornadas. Avaliações continuam dependendo de /reviews/item.
+
+IMPORTANTE: a rota central recebe JSON no corpo. Por isso o wrapper usa
+fastapi.Body explicitamente para não transformar `payload` em parâmetro de
+query string.
 """
 import math
+from fastapi import Body
 
 _V114_STATS = {"item_requests": 0, "sold_found": 0, "sold_from_items": 0}
 
@@ -111,7 +116,7 @@ def _v114_enrich_ml(items):
         item["data_confidence"] = "alta" if item.get("rating") is not None and item.get("discount_rate") is not None else "média"
         item["confidence"] = item["data_confidence"]
         item["opportunity_score"] = _v114_rescore(item)
-        item["enrichment_version"] = "V11.11.4"
+        item["enrichment_version"] = "V11.11.8"
     return enriched
 
 
@@ -120,12 +125,12 @@ _v119_enrich_ml = _v114_enrich_ml
 _original_central_v114 = _v111_central
 
 
-def _v114_central(payload):
+def _v114_central(payload: dict = Body(default={} )):
     result = _original_central_v114(payload)
     if isinstance(result, dict):
         diagnostic = list(result.get("diagnostic") or [])
         diagnostic.append(
-            "V11.11.4 vendas ML: "
+            "V11.11.8 vendas ML: "
             f"items_requests={_V114_STATS['item_requests']} "
             f"sold_fallback={_V114_STATS['sold_from_items']}"
         )
@@ -150,7 +155,7 @@ for _route in getattr(app, "routes", []):
             except Exception:
                 pass
         except Exception as exc:
-            print(f"[V11.11.4][ERRO] rota: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+            print(f"[V11.11.8][ERRO] rota: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
         break
 
-print("[V11.11.4] fallback de vendas via /products/{id}/items ativo", flush=True)
+print("[V11.11.8] fallback de vendas via /products/{id}/items ativo | BODY JSON preservado", flush=True)
