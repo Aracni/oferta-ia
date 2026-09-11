@@ -1,10 +1,13 @@
-"""OFERTA IA V11.10.12 — patch de enriquecimento do Mercado Livre.
+"""OFERTA IA V11.10.13 — patch de enriquecimento do Mercado Livre.
 
-Mantém o enriquecimento V11.10.2 e fixa o seletor de marketplace
+Mantém o enriquecimento V11.10.12 e fixa o seletor de marketplace
 estruturalmente dentro do formulário de Oportunidades, imediatamente antes
 do campo opportunityNiche. Remove versões antigas do seletor para evitar
 conflitos de HTML/JavaScript. Não usa middleware, MutationObserver ou wrapper
 ASGI para a interface.
+
+Também valida os contratos internos necessários na inicialização e não guarda
+falhas temporárias do catálogo no cache de produtos.
 """
 import math
 import time
@@ -53,8 +56,9 @@ def _v1120_product(pid, token):
                 pass
     except Exception:
         product = None
-    _V1120_PRODUCT_CACHE[pid] = (time.time(), product or {})
-    return product or None
+    if product is not None:
+        _V1120_PRODUCT_CACHE[pid] = (time.time(), product)
+    return product
 
 
 def _v1120_sold(product, winner, row, item):
@@ -214,13 +218,40 @@ try:
     anchor = re.search(r'<input\s+id="opportunityNiche"\b[^>]*>', HTML)
     if anchor:
         HTML = HTML[:anchor.start()] + _V1120_UI + '\n' + HTML[anchor.start():]
-        print('[V11.10.12] seletor único fixado diretamente antes de opportunityNiche', flush=True)
+        print('[V11.10.13] seletor único fixado diretamente antes de opportunityNiche', flush=True)
     elif '</body>' in HTML:
         HTML = HTML.replace('</body>', _V1120_UI + '</body>', 1)
-        print('[V11.10.12] seletor inserido antes de </body> (fallback)', flush=True)
+        print('[V11.10.13] seletor inserido antes de </body> (fallback)', flush=True)
     else:
-        print('[V11.10.12] ERRO: âncora opportunityNiche não encontrada', flush=True)
+        raise RuntimeError('âncora opportunityNiche e </body> não encontrados')
 except Exception as exc:
-    print(f'[V11.10.12] falha controlada na UI: {exc}', flush=True)
+    raise RuntimeError(f'Falha estrutural na UI Marketplace: {exc}') from exc
 
-print('[V11.10.12] vendas ML via /products/{id}; seletor estrutural único ativo', flush=True)
+# Contratos internos: se algum caminho congelado deixar de fornecer uma função
+# que o patch precisa, falhamos cedo no startup em vez de servir uma aplicação
+# parcialmente quebrada.
+_required = (
+    'HTML',
+    '_v9_valid_meli_token',
+    '_v11_fetch_json',
+    '_v11_remember_product',
+    '_v119_row',
+    '_v119_enrich_ml',
+)
+_missing = [name for name in _required if name not in globals() or not callable(globals().get(name)) and name != 'HTML']
+if 'HTML' not in globals() or not isinstance(HTML, str):
+    _missing.append('HTML')
+if _missing:
+    raise RuntimeError('Contrato interno OFERTA IA inválido; ausentes: ' + ', '.join(dict.fromkeys(_missing)))
+
+_selector_count = HTML.count('id="oferta-market-filter"')
+_old_selector_count = HTML.count('id="v119-market-filter"')
+if _selector_count != 1 or _old_selector_count != 0:
+    raise RuntimeError(
+        f'Contrato visual inválido: seletor atual={_selector_count}, seletor legado={_old_selector_count}'
+    )
+if 'id="opportunityNiche"' not in HTML:
+    raise RuntimeError('Contrato visual inválido: opportunityNiche não está no HTML final')
+
+print('[V11.10.13] contrato interno + HTML validados | seletor único ativo', flush=True)
+print('[V11.10.13] vendas ML via /products/{id}; falhas temporárias não ficam em cache', flush=True)
