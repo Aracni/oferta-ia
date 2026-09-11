@@ -1,4 +1,4 @@
-"""OFERTA IA V11.11 — enriquecimento confiável do Mercado Livre."""
+"""OFERTA IA V11.11.3 — enriquecimento confiável do Mercado Livre."""
 import math
 import time
 import urllib.parse
@@ -217,7 +217,7 @@ def _v111_enrich_ml(items):
         item["earnings"] = None
         item["commission_source"] = "não disponível no catálogo público"
         item["opportunity_score"] = _v111_score(item, sold, rating, discount)
-        item["enrichment_version"] = "V11.11"
+        item["enrichment_version"] = "V11.11.3"
         enriched.append(item)
     return enriched
 
@@ -227,19 +227,55 @@ _original_central = _v119_central
 
 
 def _v111_central(payload: dict):
-    result = _original_central(payload)
+    try:
+        result = _original_central(payload)
+        if not isinstance(result, dict):
+            raise RuntimeError("O motor central retornou uma resposta inválida.")
+    except Exception as exc:
+        message = f"{type(exc).__name__}: {str(exc)[:500]}"
+        try:
+            _append_log(app, "ERROR", "V11.11 motor central falhou", error=message)
+        except Exception:
+            pass
+        print(f"[V11.11][ERRO] Motor central: {message}", flush=True)
+        return {
+            "status": "error",
+            "items": [],
+            "opportunities": [],
+            "returned": 0,
+            "candidates_found": 0,
+            "diagnostic": [f"V11.11 ERRO REAL: {message}"],
+            "message": f"⚠️ V11.11 encontrou um erro: {message}",
+        }
     diagnostics = list(result.get("diagnostic") or [])
     diagnostics.append("V11.11 ML: " + f"products_ok={_V111_STATS['product_ok']} sold={_V111_STATS['sold_found']} rating={_V111_STATS['rating_found']} reviews_ok={_V111_STATS['reviews_ok']} reviews_403={_V111_STATS['reviews_blocked']}")
     result["diagnostic"] = diagnostics
     result["message"] = " · ".join(diagnostics)
     return result
 
+
 for _route in getattr(app, "routes", []):
     if getattr(_route, "path", None) == "/api/opportunities-central" and "POST" in (getattr(_route, "methods", set()) or set()):
         _route.endpoint = _v111_central
         try:
-            _route.dependant.call = _v111_central
-        except Exception:
-            pass
+            from fastapi.dependencies.utils import get_dependant
+            from fastapi.routing import request_response
+            _route.dependant = get_dependant(path=_route.path, call=_v111_central)
+            _base_route_app = request_response(_route.get_route_handler())
 
-print("[V11.11] enriquecimento ML ativo | /products + reviews com fallback seguro | comissão não inventada", flush=True)
+            # Recria o adaptador ASGI depois de trocar o endpoint. O V10.8
+            # havia criado o route.app anteriormente, então apenas trocar
+            # endpoint/dependant não seria suficiente.
+            try:
+                import meli_fast as _meli_fast
+                async def _v111_route_app(scope, receive, send, _original=_base_route_app):
+                    return await _meli_fast._asgi(scope, receive, send, _original)
+                _route.app = _v111_route_app
+            except Exception:
+                _route.app = _base_route_app
+            print("[V11.11.3] rota central reconstruída com endpoint V11.11", flush=True)
+        except Exception as exc:
+            print(f"[V11.11.3][ERRO] reconstrução da rota: {type(exc).__name__}: {str(exc)[:500]}", flush=True)
+        break
+
+print("[V11.11.3] enriquecimento ML ativo | /products + reviews | rota central reconstruída | comissão não inventada", flush=True)
