@@ -20,6 +20,7 @@ meli_fast.install(oferta_app.app)
 
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
+_PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/de15b6e1514dea9d3340128498465091e13fcfa6/ml_item_sales_v1.py"
 
 
 def _load_patch(url):
@@ -50,26 +51,28 @@ except Exception as exc:
     print(f"[BOOT][WARN] fallback de vendas não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
+    item_sales_patch = _load_patch(_PATCH_ITEM_SALES)
+    exec(compile(item_sales_patch, _PATCH_ITEM_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] fallback de vendas V11.11.11 carregado", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] fallback item winner não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+try:
     import ui_fix
     ui_fix.install(oferta_app)
     print("[BOOT] UI V11.11.5 instalada", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] UI não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-# Health check mínimo: não toca em Supabase, Mercado Livre, Shopee ou no núcleo.
-# Serve para distinguir processo vivo de aplicação sem instância saudável.
 try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.10"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.11"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-# Diagnóstico de borda: Render recomenda registrar CF-Ray e Rndr-Id
-# para distinguir requisições que chegaram ao FastAPI das que falharam antes dele.
-# Não altera respostas nem lógica de negócio.
 try:
     @oferta_app.app.middleware("http")
     async def _oferta_edge_trace(request: Request, call_next):
@@ -100,7 +103,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V11.11.10] boot resiliente; fallback de vendas otimizado', flush=True)
+print('[V11.11.11] boot resiliente; fallback via item vencedor ativo', flush=True)
 
 import uvicorn
 
