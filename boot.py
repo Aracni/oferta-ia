@@ -19,7 +19,7 @@ import meli_fast
 meli_fast.install(oferta_app.app)
 
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
-_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c15fd751f27e9412c4d392f2b7e7f170de221a3c/ml_sales_fallback_v4.py"
+_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
 
 
 def _load_patch(url):
@@ -45,7 +45,7 @@ except Exception as exc:
 try:
     sales_patch = _load_patch(_PATCH_SALES)
     exec(compile(sales_patch, _PATCH_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] fallback de vendas V11.11.9 carregado", flush=True)
+    print("[BOOT] fallback de vendas V11.11.10 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] fallback de vendas não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
@@ -62,7 +62,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.9"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.10"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -100,7 +100,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V11.11.9] boot resiliente; rota central reconstruída uma única vez', flush=True)
+print('[V11.11.10] boot resiliente; fallback de vendas otimizado', flush=True)
 
 import uvicorn
 
