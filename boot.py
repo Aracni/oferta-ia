@@ -21,6 +21,7 @@ meli_fast.install(oferta_app.app)
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/de15b6e1514dea9d3340128498465091e13fcfa6/ml_item_sales_v1.py"
+_PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/f03ccecc508a469590db9e8d7afb1f8fe1df88f1/ml_reviews_fallback_v1.py"
 
 
 def _load_patch(url):
@@ -58,6 +59,13 @@ except Exception as exc:
     print(f"[BOOT][WARN] fallback item winner não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
+    reviews_patch = _load_patch(_PATCH_REVIEWS)
+    exec(compile(reviews_patch, _PATCH_REVIEWS, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] fallback de avaliações V11.11.12 carregado", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] fallback de avaliações não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+try:
     import ui_fix
     ui_fix.install(oferta_app)
     print("[BOOT] UI V11.11.5 instalada", flush=True)
@@ -68,7 +76,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.11"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.12"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -103,7 +111,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V11.11.11] boot resiliente; fallback via item vencedor ativo', flush=True)
+print('[V11.11.12] boot resiliente; fallback via item vencedor + avaliações ativo', flush=True)
 
 import uvicorn
 
