@@ -20,7 +20,8 @@ meli_fast.install(oferta_app.app)
 
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
-_PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/de15b6e1514dea9d3340128498465091e13cffa6/ml_item_sales_v1.py"
+# V11.11.15: usar main porque a referência de commit anterior não existia no Git.
+_PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_item_sales_v1.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/6f0ab9636ce9586a205606c2c58da6304b3b83ec/ml_market_signals_v14.py"
 
@@ -55,7 +56,7 @@ except Exception as exc:
 try:
     item_sales_patch = _load_patch(_PATCH_ITEM_SALES)
     exec(compile(item_sales_patch, _PATCH_ITEM_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] fallback de vendas V11.11.11 carregado", flush=True)
+    print("[BOOT] fallback de vendas V11.11.15 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] fallback item winner não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
@@ -84,7 +85,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.14"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.15"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -119,7 +120,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V11.11.14] boot resiliente; sinais de mercado + fallback de vendas e avaliações ativos', flush=True)
+print('[V11.11.15] boot resiliente; fallback item winner + sinais de mercado + vendas e avaliações ativos', flush=True)
 
 import uvicorn
 
