@@ -20,8 +20,9 @@ meli_fast.install(oferta_app.app)
 
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
-_PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/de15b6e1514dea9d3340128498465091e13fcfa6/ml_item_sales_v1.py"
+_PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/de15b6e1514dea9d3340128498465091e13cffa6/ml_item_sales_v1.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
+_PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/6f0ab9636ce9586a205606c2c58da6304b3b83ec/ml_market_signals_v14.py"
 
 
 def _load_patch(url):
@@ -66,6 +67,13 @@ except Exception as exc:
     print(f"[BOOT][WARN] fallback de avaliações não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
+    market_patch = _load_patch(_PATCH_MARKET)
+    exec(compile(market_patch, _PATCH_MARKET, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] sinais de mercado V11.11.14 carregados", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] sinais de mercado não instalados: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+try:
     import ui_fix
     ui_fix.install(oferta_app)
     print("[BOOT] UI V11.11.5 instalada", flush=True)
@@ -76,7 +84,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.13"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V11.11.14"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -102,7 +110,7 @@ try:
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             print(
                 f"[EDGE_TRACE][ERROR] {request.method} {request.url.path} "
-                f"host={host} cf_ray={cf_ray} rndr_id={rndr_id} "
+                f"status=exception host={host} cf_ray={cf_ray} rndr_id={rndr_id} "
                 f"elapsed_ms={elapsed_ms} error={type(exc).__name__}: {str(exc)[:300]}",
                 flush=True,
             )
@@ -111,7 +119,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V11.11.13] boot resiliente; fallback via item vencedor + avaliações ativo', flush=True)
+print('[V11.11.14] boot resiliente; sinais de mercado + fallback de vendas e avaliações ativos', flush=True)
 
 import uvicorn
 
