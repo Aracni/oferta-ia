@@ -9,6 +9,16 @@ import v106_patch
 
 v106_patch.install(oferta_app.app)
 
+# Supabase new sb_secret_* keys are opaque API keys, not JWTs.
+# Remove any Authorization: Bearer header injected by supabase-py so
+# PostgREST validates the secret through the apikey header instead.
+try:
+    import supabase_secret_compat_v1
+    supabase_secret_compat_v1.install(oferta_app)
+    print("[BOOT] compatibilidade Supabase sb_secret_* carregada", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] compatibilidade Supabase não instalada: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+
 oferta_app.app._get_connection = oferta_app._get_connection
 oferta_app.app._save_connection = oferta_app._save_connection
 
