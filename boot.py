@@ -20,11 +20,10 @@ meli_fast.install(oferta_app.app)
 
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
-# V11.11.16: fixar o fallback item winner em commit existente e estável.
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/6f0ab9636ce9586a205606c2c58da6304b3b83ec/ml_market_signals_v14.py"
-_PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/e6373f14ac796910c4eb4d15ed80629581e167ea/opportunity_engine_v1.py"
+_PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/bd9018fc829c436ce85e0d3a42835d6c6b05b8b5/opportunity_engine_v12_1.py"
 
 
 def _load_patch(url):
@@ -78,7 +77,7 @@ except Exception as exc:
 try:
     opportunity_patch = _load_patch(_PATCH_OPPORTUNITY)
     exec(compile(opportunity_patch, _PATCH_OPPORTUNITY, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] motor de oportunidade V12.0 carregado", flush=True)
+    print("[BOOT] motor de oportunidade V12.1 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] motor de oportunidade não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
@@ -93,7 +92,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.0"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.1"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -128,7 +127,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V12.0] boot resiliente; motor de oportunidade + sinais de mercado + vendas e avaliações ativos', flush=True)
+print('[V12.1] boot resiliente; motor de oportunidade + sinais de mercado + vendas e avaliações ativos', flush=True)
 
 import uvicorn
 
