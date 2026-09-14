@@ -31,6 +31,7 @@ _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf29
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/6f0ab9636ce9586a205606c2c58da6304b3b83ec/ml_market_signals_v14.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
+_PATCH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/909141fe8445b6b089f433467b3a538f55023337/opportunity_diagnostic_v1.py"
 
 
 def _load_patch(url):
@@ -89,6 +90,16 @@ except Exception as exc:
     print(f"[BOOT][WARN] motor de oportunidade não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
+    diagnostic_patch = _load_patch(_PATCH_DIAGNOSTIC)
+    exec(compile(diagnostic_patch, _PATCH_DIAGNOSTIC, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    diagnostic_install = oferta_app.__dict__.get("_v124_install")
+    if callable(diagnostic_install):
+        diagnostic_install(oferta_app)
+    print("[BOOT] diagnóstico V12.4 carregado", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] diagnóstico V12.4 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+try:
     import ui_fix
     ui_fix.install(oferta_app)
     print("[BOOT] UI V11.11.5 instalada", flush=True)
@@ -99,7 +110,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.3"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.4"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -134,7 +145,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V12.3] boot resiliente; motor de oportunidade + sinais de mercado + vendas e avaliações ativos', flush=True)
+print('[V12.4] boot resiliente; diagnóstico do motor de oportunidade + motor V12.3 + sinais de mercado + vendas e avaliações ativos', flush=True)
 
 import uvicorn
 
