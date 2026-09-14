@@ -9,9 +9,6 @@ import v106_patch
 
 v106_patch.install(oferta_app.app)
 
-# Supabase new sb_secret_* keys are opaque API keys, not JWTs.
-# Remove any Authorization: Bearer header injected by supabase-py so
-# PostgREST validates the secret through the apikey header instead.
 try:
     import supabase_secret_compat_v1
     supabase_secret_compat_v1.install(oferta_app)
@@ -33,7 +30,7 @@ _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef4218
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/6f0ab9636ce9586a205606c2c58da6304b3b83ec/ml_market_signals_v14.py"
-_PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/4fc607d2f9043e1351072058a0cb0c74da5e8404/opportunity_engine_v12_2.py"
+_PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
 
 
 def _load_patch(url):
@@ -87,7 +84,7 @@ except Exception as exc:
 try:
     opportunity_patch = _load_patch(_PATCH_OPPORTUNITY)
     exec(compile(opportunity_patch, _PATCH_OPPORTUNITY, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] motor de oportunidade V12.2 carregado", flush=True)
+    print("[BOOT] motor de oportunidade V12.3 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] motor de oportunidade não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
@@ -102,7 +99,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.2"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.3"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -137,7 +134,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V12.2] boot resiliente; motor de oportunidade + sinais de mercado + vendas e avaliações ativos', flush=True)
+print('[V12.3] boot resiliente; motor de oportunidade + sinais de mercado + vendas e avaliações ativos', flush=True)
 
 import uvicorn
 
