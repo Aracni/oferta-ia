@@ -33,6 +33,7 @@ _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/35de297603b1bf621c0ddd174d234766741d4c79/ml_market_signals_v15.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
 _PATCH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/909141fe8445b6b089f433467b3a538f55023337/opportunity_diagnostic_v1.py"
+_PATCH_CLEAN_CENTRAL = "https://raw.githubusercontent.com/Aracni/oferta-ia/fea1802a31c9528de79085e50d021073314e2c5c/central_clean_v125.py"
 
 
 def _load_patch(url):
@@ -72,7 +73,7 @@ except Exception as exc:
 try:
     item_sales_patch = _load_patch(_PATCH_ITEM_SALES)
     exec(compile(item_sales_patch, _PATCH_ITEM_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] fallback de vendas V11.11.16 carregado", flush=True)
+    print("[BOOT] fallback item winner V11.11.16 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] fallback item winner não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
@@ -106,6 +107,13 @@ try:
     print("[BOOT] diagnóstico V12.4 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] diagnóstico V12.4 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+try:
+    clean_central_patch = _load_patch(_PATCH_CLEAN_CENTRAL)
+    exec(compile(clean_central_patch, _PATCH_CLEAN_CENTRAL, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] rota central limpa V12.5 carregada", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] rota central limpa não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
     import ui_fix
