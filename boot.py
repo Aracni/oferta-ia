@@ -17,7 +17,7 @@ except Exception as exc:
     print(f"[BOOT][WARN] compatibilidade Supabase não instalada: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
 oferta_app.app._get_connection = oferta_app._get_connection
-oferta_app.app._save_connection = oferta_app._save_connection
+o oferta_app.app._save_connection = oferta_app._save_connection
 
 import meli_auto
 meli_auto.install(oferta_app.app)
@@ -29,7 +29,7 @@ _PATCH_ITEM_RECOVERY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a63f1
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
 _PATCH_DIRECT_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/2884d6f5a4d41b647b2d8048d4aa642a96f58516/ml_direct_item_sales_v125.py"
-_PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
+_PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72f4c4d860b464e21f/ml_reviews_fallback_v2.py"
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/7a4115c7f7484eeda23d19a73ab80cacbd43fb54/ml_market_signals_v16.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
 _PATCH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/909141fe8445b6b089f433467b3a538f55023337/opportunity_diagnostic_v1.py"
@@ -63,11 +63,15 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] V11.11.6 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-# O fallback V11.11.10 existe no próprio repositório. Carregá-lo localmente
-# evita depender de raw.githubusercontent.com durante o boot do Render.
+# O fallback V11.11.10 depende de funções que vivem no namespace de app.py.
+# Importá-lo como módulo isolado quebra essa dependência; por isso executamos
+# o arquivo local diretamente no namespace do aplicativo.
 try:
-    import ml_sales_fallback_v5
-    print("[BOOT] fallback de vendas V11.11.10 local carregado", flush=True)
+    import pathlib
+    _sales_path = pathlib.Path(__file__).with_name("ml_sales_fallback_v5.py")
+    sales_patch = _sales_path.read_text(encoding="utf-8")
+    exec(compile(sales_patch, str(_sales_path), "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] fallback de vendas V11.11.10 local carregado no namespace do app", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] fallback de vendas não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
