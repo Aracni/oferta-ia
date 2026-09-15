@@ -1,4 +1,4 @@
-"""Inicialização explícita do OFERTA IA — boot resiliente."""
+"""Boot resiliente do OFERTA IA."""
 import os
 import time
 import urllib.request
@@ -8,20 +8,18 @@ import app as oferta_app
 import v106_patch
 
 v106_patch.install(oferta_app.app)
-
 try:
     import supabase_secret_compat_v1
     supabase_secret_compat_v1.install(oferta_app)
     print("[BOOT] compatibilidade Supabase sb_secret_* carregada", flush=True)
 except Exception as exc:
-    print(f"[BOOT][WARN] compatibilidade Supabase não instalada: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+    print(f"[BOOT][WARN] compatibilidade Supabase: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-o ferta_app.app._get_connection = oferta_app._get_connection
-oferta_app.app._save_connection = oferta_app._save_connection
+setattr(oferta_app.app, "_get_connection", oferta_app._get_connection)
+setattr(oferta_app.app, "_save_connection", oferta_app._save_connection)
 
 import meli_auto
 meli_auto.install(oferta_app.app)
-
 import meli_fast
 meli_fast.install(oferta_app.app)
 
@@ -45,88 +43,52 @@ def _load_patch(url):
         except Exception as exc:
             last_error = exc
             if attempt < 2:
-                time.sleep(1.0 * (attempt + 1))
+                time.sleep(attempt + 1)
     raise RuntimeError(f"Não foi possível carregar patch do OFERTA IA: {last_error}") from last_error
 
-try:
-    recovery_patch = _load_patch(_PATCH_ITEM_RECOVERY)
-    exec(compile(recovery_patch, _PATCH_ITEM_RECOVERY, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] recuperação de dados ITEM V12.5 carregada", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] recuperação ITEM não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-try:
-    patch = _load_patch(_PATCH)
-    exec(compile(patch, _PATCH, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] V11.11.6 carregado", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] V11.11.6 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+def _exec_patch(url, label):
+    try:
+        source = _load_patch(url)
+        exec(compile(source, url, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+        print(f"[BOOT] {label} carregado", flush=True)
+    except Exception as exc:
+        print(f"[BOOT][WARN] {label}: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+_exec_patch(_PATCH_ITEM_RECOVERY, "recuperação de dados ITEM V12.5")
+_exec_patch(_PATCH, "V11.11.6")
 
 try:
     import ml_sales_fallback_v5
     oferta_app._v119_enrich_ml = ml_sales_fallback_v5._v115_enrich_ml
     print("[BOOT] fallback de vendas V11.11.10 local instalado no app", flush=True)
 except Exception as exc:
-    print(f"[BOOT][WARN] fallback de vendas não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+    print(f"[BOOT][WARN] fallback de vendas: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+_exec_patch(_PATCH_ITEM_SALES, "fallback item winner V11.11.16")
+_exec_patch(_PATCH_DIRECT_ITEM_SALES, "vendas diretas por ITEM V12.5")
+_exec_patch(_PATCH_REVIEWS, "fallback de avaliações V11.11.13")
+_exec_patch(_PATCH_MARKET, "sinais de mercado V12.5 isolados")
+_exec_patch(_PATCH_OPPORTUNITY, "motor de oportunidade V12.3")
 
 try:
-    item_sales_patch = _load_patch(_PATCH_ITEM_SALES)
-    exec(compile(item_sales_patch, _PATCH_ITEM_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] fallback item winner V11.11.16 carregado", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] fallback item winner não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
-
-try:
-    direct_item_sales_patch = _load_patch(_PATCH_DIRECT_ITEM_SALES)
-    exec(compile(direct_item_sales_patch, _PATCH_DIRECT_ITEM_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] vendas diretas por ITEM V12.5 carregadas", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] vendas diretas por ITEM não instaladas: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
-
-try:
-    reviews_patch = _load_patch(_PATCH_REVIEWS)
-    exec(compile(reviews_patch, _PATCH_REVIEWS, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] fallback de avaliações V11.11.13 carregado", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] fallback de avaliações não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
-
-try:
-    market_patch = _load_patch(_PATCH_MARKET)
-    exec(compile(market_patch, _PATCH_MARKET, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] sinais de mercado V12.5 isolados carregados", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] sinais de mercado não instalados: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
-
-try:
-    opportunity_patch = _load_patch(_PATCH_OPPORTUNITY)
-    exec(compile(opportunity_patch, _PATCH_OPPORTUNITY, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] motor de oportunidade V12.3 carregado", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] motor de oportunidade não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
-
-try:
-    diagnostic_patch = _load_patch(_PATCH_DIAGNOSTIC)
-    exec(compile(diagnostic_patch, _PATCH_DIAGNOSTIC, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    diagnostic_install = oferta_app.__dict__.get("_v124_install")
-    if callable(diagnostic_install):
-        diagnostic_install(oferta_app)
+    diagnostic_source = _load_patch(_PATCH_DIAGNOSTIC)
+    exec(compile(diagnostic_source, _PATCH_DIAGNOSTIC, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    installer = oferta_app.__dict__.get("_v124_install")
+    if callable(installer):
+        installer(oferta_app)
     print("[BOOT] diagnóstico V12.4 carregado", flush=True)
 except Exception as exc:
-    print(f"[BOOT][WARN] diagnóstico V12.4 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+    print(f"[BOOT][WARN] diagnóstico V12.4: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-try:
-    clean_central_patch = _load_patch(_PATCH_CLEAN_CENTRAL)
-    exec(compile(clean_central_patch, _PATCH_CLEAN_CENTRAL, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] rota central limpa V12.5 carregada", flush=True)
-except Exception as exc:
-    print(f"[BOOT][WARN] rota central limpa não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+_exec_patch(_PATCH_CLEAN_CENTRAL, "rota central limpa V12.5")
 
 try:
     import ui_fix
     ui_fix.install(oferta_app)
     print("[BOOT] UI V11.11.5 instalada", flush=True)
 except Exception as exc:
-    print(f"[BOOT][WARN] UI não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+    print(f"[BOOT][WARN] UI: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
@@ -135,7 +97,7 @@ try:
             return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.5"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
-    print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+    print(f"[HEALTH][WARN] /healthz: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
 try:
     @oferta_app.app.middleware("http")
@@ -155,11 +117,10 @@ try:
             raise
     print("[EDGE_TRACE] rastreamento CF-Ray/Rndr-Id ativo", flush=True)
 except Exception as exc:
-    print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+    print(f"[EDGE_TRACE][WARN] rastreamento: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V12.5] boot resiliente; recuperação ITEM + vendas diretas por ITEM + diagnóstico + motor V12.3 + sinais de mercado isolados + vendas e avaliações ativos', flush=True)
+print("[V12.5] boot resiliente ativo", flush=True)
 
 import uvicorn
-
 if __name__ == "__main__":
     uvicorn.run(oferta_app.app, host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))
