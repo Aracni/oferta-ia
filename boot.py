@@ -27,7 +27,6 @@ meli_fast.install(oferta_app.app)
 
 _PATCH_ITEM_RECOVERY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a63f187d1bc6c2aa9b68abb6f749fab97c35472c/meli_data_recovery_v1.py"
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
-_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca6/ml_sales_fallback_v5.py"
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
 _PATCH_DIRECT_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/2884d6f5a4d41b647b2d8048d4aa642a96f58516/ml_direct_item_sales_v125.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
@@ -64,10 +63,11 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] V11.11.6 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
+# O fallback V11.11.10 existe no próprio repositório. Carregá-lo localmente
+# evita depender de raw.githubusercontent.com durante o boot do Render.
 try:
-    sales_patch = _load_patch(_PATCH_SALES)
-    exec(compile(sales_patch, _PATCH_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] fallback de vendas V11.11.10 carregado", flush=True)
+    import ml_sales_fallback_v5
+    print("[BOOT] fallback de vendas V11.11.10 local carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] fallback de vendas não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
