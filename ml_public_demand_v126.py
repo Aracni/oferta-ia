@@ -39,12 +39,25 @@ def _v126_public_search(title, token):
         return None
 
 
+# Capture the previous enrichment function BEFORE installing this wrapper.
+_V126_PREVIOUS_ENRICH = globals().get("_v119_enrich_ml")
+
+
 def _v126_enrich(items):
     try:
         token = _v9_valid_meli_token()
     except Exception:
         token = None
-    enriched = _v119_enrich_ml(items)
+
+    base_enrich = _V126_PREVIOUS_ENRICH
+    if callable(base_enrich):
+        enriched = base_enrich(items)
+    else:
+        enriched = items
+
+    if not isinstance(enriched, list):
+        return enriched
+
     for item in enriched:
         if not isinstance(item, dict) or item.get("sold_quantity") is not None:
             continue
@@ -82,9 +95,10 @@ def _v126_enrich(items):
             item["enrichment_version"] = "V12.6-public-demand"
             _V126_PUBLIC_STATS["found"] += 1
             break
+
     print(f"[V12.6] demanda pública: requests={_V126_PUBLIC_STATS['requests']} matched={_V126_PUBLIC_STATS['matched']} found={_V126_PUBLIC_STATS['found']} errors={_V126_PUBLIC_STATS['errors']}", flush=True)
     return enriched
 
 
 _v119_enrich_ml = _v126_enrich
-print("[V12.6] sinal público de demanda ativo | sem inventar vendas", flush=True)
+print("[V12.6] sinal público de demanda ativo | sem recursão | sem inventar vendas", flush=True)
