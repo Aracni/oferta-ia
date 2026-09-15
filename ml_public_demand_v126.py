@@ -1,8 +1,8 @@
-"""OFERTA IA V12.6 — recuperação de vendas via itens de catálogo, com fallback seguro.
+"""OFERTA IA V12.6 — recuperação de vendas via produto de catálogo.
 
-Usa primeiro o endpoint de itens do catálogo, que já está respondendo 200 no OFERTA IA.
+Usa o detalhe /products/{PRODUCT_ID}, que expõe sold_quantity do produto/PDP.
+Depois tenta /products/{PRODUCT_ID}/items e, por fim, busca pública.
 Só aceita sold_quantity explicitamente retornado pela API. Nunca inventa vendas.
-A busca /sites/MLB/search fica como fallback e não repete chamadas 403.
 """
 import math
 import re
@@ -59,8 +59,26 @@ def _v126_status_record(status):
         _V126_PUBLIC_STATS["status_other"] += 1
 
 
+def _v126_catalog_product(catalog_id, token):
+    """Detalhe da PDP: a API documenta sold_quantity no produto de catálogo."""
+    if not catalog_id or not token:
+        return None
+    url = f"https://api.mercadolibre.com/products/{catalog_id}"
+    try:
+        data, status = _v11_fetch_json(token, url, timeout=6, stage="CATALOG_PRODUCT_V12_6")
+        status = int(status or 0)
+        if isinstance(data, dict) and 200 <= status < 300:
+            _V126_PUBLIC_STATS["catalog_ok"] += 1
+            if data.get("sold_quantity") is not None:
+                return data
+        _v126_status_record(status)
+    except Exception as exc:
+        print(f"[V12.6][CATALOG_PRODUCT] falha={type(exc).__name__}", flush=True)
+    return None
+
+
 def _v126_catalog_items(catalog_id, token):
-    """Endpoint que já foi observado como HTTP 200 no próprio OFERTA IA."""
+    """Lista de anúncios da PDP; usada somente quando o detalhe não traz vendas."""
     if not catalog_id or not token:
         return []
     url = f"https://api.mercadolibre.com/products/{catalog_id}/items"
@@ -118,28 +136,37 @@ def _v126_enrich(items):
         catalog_id = _v126_catalog_id(item)
         chosen = None
 
-        # Caminho principal: o log desta execução mostrou que este endpoint retorna 200.
+        # Caminho principal: detalhe da PDP. A documentação do Mercado Livre
+        # expõe sold_quantity diretamente em /products/{PRODUCT_ID}.
         if catalog_id and token:
+            chosen = _v126_catalog_product(catalog_id, token)
+
+        # Segundo caminho: anúncios da PDP. Só considera uma linha se ela
+        # realmente trouxer sold_quantity; isso evita bloquear o fallback.
+        if chosen is None and catalog_id and token:
             rows = _v126_catalog_items(catalog_id, token)
             if rows:
                 if item_id:
-                    chosen = next((row for row in rows if _v126_item_id(row) == item_id), None)
+                    row = next((r for r in rows if _v126_item_id(r) == item_id and r.get("sold_quantity") is not None), None)
+                    if row is not None:
+                        chosen = row
                 if chosen is None:
-                    chosen = next((row for row in rows if row.get("sold_quantity") is not None), None)
+                    chosen = next((r for r in rows if r.get("sold_quantity") is not None), None)
                 if chosen is not None:
                     _V126_PUBLIC_STATS["matched"] += 1
 
-        # Fallback: busca pública somente se o catálogo não trouxe sold_quantity.
+        # Fallback: busca pública somente se os endpoints de catálogo não
+        # trouxeram sold_quantity.
         if chosen is None and title:
             results = _v126_public_search(title)
             if results:
                 if item_id:
-                    chosen = next((row for row in results if _v126_item_id(row) == item_id), None)
+                    chosen = next((row for row in results if _v126_item_id(row) == item_id and row.get("sold_quantity") is not None), None)
                 if chosen is None and catalog_id:
-                    chosen = next((row for row in results if _v126_catalog_id(row) == catalog_id), None)
+                    chosen = next((row for row in results if _v126_catalog_id(row) == catalog_id and row.get("sold_quantity") is not None), None)
                 if chosen is None:
                     wanted = _v126_norm_title(title)
-                    chosen = next((row for row in results if wanted and _v126_norm_title(row.get("title")) == wanted), None)
+                    chosen = next((row for row in results if wanted and _v126_norm_title(row.get("title")) == wanted and row.get("sold_quantity") is not None), None)
                 if chosen is not None:
                     _V126_PUBLIC_STATS["matched"] += 1
 
@@ -156,7 +183,7 @@ def _v126_enrich(items):
         item["sold_quantity"] = sold
         item["sales"] = sold
         item["sales_count"] = sold
-        item["sales_source"] = "catalog_items" if catalog_id else "public_search"
+        item["sales_source"] = "catalog_product" if catalog_id else "public_search"
         item["demand_source"] = item["sales_source"]
         item["demand_index"] = round(min(100.0, math.log1p(sold) / math.log1p(10000) * 100.0), 2)
         item["confidence"] = "alta" if sold > 0 else item.get("confidence") or "média"
@@ -167,7 +194,7 @@ def _v126_enrich(items):
         except Exception:
             pass
         item["score_provisional"] = False if item.get("rating") is not None else True
-        item["enrichment_version"] = "V12.6-catalog-sales"
+        item["enrichment_version"] = "V12.6-catalog-product-sales"
         _V126_PUBLIC_STATS["found"] += 1
 
     print(
@@ -182,4 +209,4 @@ def _v126_enrich(items):
 
 
 _v119_enrich_ml = _v126_enrich
-print("[V12.6] vendas: prioriza products/{catalog}/items | fallback público sem retry 403")
+print("[V12.6] vendas: detalhe products/{catalog} com sold_quantity + fallback seguro")
