@@ -27,8 +27,9 @@ meli_fast.install(oferta_app.app)
 
 _PATCH_ITEM_RECOVERY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a63f187d1bc6c2aa9b68abb6f749fab97c35472c/meli_data_recovery_v1.py"
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
-_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
+_PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca6/ml_sales_fallback_v5.py"
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
+_PATCH_DIRECT_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/67073acc8bf1c81a99489cf3d1ec22fa3ae7a774/ml_direct_item_sales_v125.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/7a4115c7f7484eeda23d19a73ab80cacbd43fb54/ml_market_signals_v16.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
@@ -58,7 +59,7 @@ except Exception as exc:
 
 try:
     patch = _load_patch(_PATCH)
-    exec(compile(patch, _PATCH, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    exec(compile(patch, _PATCH, _PATCH if False else "exec"), oferta_app.__dict__, oferta_app.__dict__)
     print("[BOOT] V11.11.6 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] V11.11.6 não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
@@ -76,6 +77,13 @@ try:
     print("[BOOT] fallback item winner V11.11.16 carregado", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] fallback item winner não instalado: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+try:
+    direct_item_sales_patch = _load_patch(_PATCH_DIRECT_ITEM_SALES)
+    exec(compile(direct_item_sales_patch, _PATCH_DIRECT_ITEM_SALES, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] vendas diretas por ITEM V12.5 carregadas", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] vendas diretas por ITEM não instaladas: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
     reviews_patch = _load_patch(_PATCH_REVIEWS)
@@ -161,7 +169,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V12.5] boot resiliente; recuperação ITEM + diagnóstico do motor de oportunidade + motor V12.3 + sinais de mercado isolados + vendas e avaliações ativos', flush=True)
+print('[V12.5] boot resiliente; recuperação ITEM + vendas diretas por ITEM + diagnóstico + motor V12.3 + sinais de mercado isolados + vendas e avaliações ativos', flush=True)
 
 import uvicorn
 
