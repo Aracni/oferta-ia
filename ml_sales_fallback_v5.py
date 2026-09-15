@@ -1,14 +1,13 @@
-"""V11.11.10 — fallback de vendas otimizado do Mercado Livre.
-
-Melhora o V11.11.9 em dois pontos: consulta os produtos em paralelo para
-reduzir a latência do endpoint e usa a maior venda encontrada entre as
-ofertas do catálogo, em vez de confiar na primeira oferta retornada.
-"""
+"""V11.11.10 — fallback de vendas otimizado do Mercado Livre."""
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import app as _oferta_app
 
 _V115_STATS = {"item_requests": 0, "sold_found": 0, "sold_from_items": 0, "errors": 0}
 _V115_MAX_WORKERS = 5
+_v11_fetch_json = _oferta_app.__dict__.get("_v11_fetch_json")
+_v9_valid_meli_token = _oferta_app.__dict__.get("_v9_valid_meli_token")
+_original_enrich_v115 = _oferta_app.__dict__.get("_v119_enrich_ml")
 
 
 def _v115_num(value):
@@ -21,7 +20,6 @@ def _v115_num(value):
 
 
 def _v115_walk_sold(value):
-    """Retorna o MAIOR sold_quantity encontrado em toda a árvore."""
     values = []
     if isinstance(value, dict):
         sold = _v115_num(value.get("sold_quantity"))
@@ -41,15 +39,10 @@ def _v115_walk_sold(value):
 
 
 def _v115_product_items(pid, token):
-    if not pid or not token:
+    if not pid or not token or not callable(_v11_fetch_json):
         return pid, None, None
     try:
-        data, status = _v11_fetch_json(
-            token,
-            f"https://api.mercadolibre.com/products/{pid}/items",
-            timeout=6,
-            stage="ENRICH_V11_11_ITEMS",
-        )
+        data, status = _v11_fetch_json(token, f"https://api.mercadolibre.com/products/{pid}/items", timeout=6, stage="ENRICH_V11_11_ITEMS")
         if isinstance(data, (dict, list)) and status and 200 <= int(status) < 300:
             return pid, data, int(status)
         return pid, None, int(status or 0)
@@ -83,18 +76,13 @@ def _v115_rescore(item):
     return round(old * 0.35 + fresh * 0.65, 2) if score is not None else round(fresh, 2)
 
 
-_original_enrich_v115 = _v119_enrich_ml
-
-
 def _v115_enrich_ml(items):
     _V115_STATS.update({"item_requests": 0, "sold_found": 0, "sold_from_items": 0, "errors": 0})
+    if not callable(_original_enrich_v115):
+        return items
     enriched = _original_enrich_v115(items)
-    try:
-        token = _v9_valid_meli_token()
-    except Exception:
-        token = None
-    pending = []
-    seen = set()
+    token = _v9_valid_meli_token() if callable(_v9_valid_meli_token) else None
+    pending, seen = [], set()
     for item in enriched:
         if not isinstance(item, dict) or item.get("sold_quantity") is not None:
             continue
@@ -133,15 +121,7 @@ def _v115_enrich_ml(items):
         item["confidence"] = item["data_confidence"]
         item["opportunity_score"] = _v115_rescore(item)
         item["enrichment_version"] = "V11.11.10"
-    print(
-        "[V11.11.10] fallback vendas: "
-        f"requests={_V115_STATS['item_requests']} "
-        f"sold_found={_V115_STATS['sold_found']} "
-        f"errors={_V115_STATS['errors']} workers={_V115_MAX_WORKERS}",
-        flush=True,
-    )
+    print(f"[V11.11.10] fallback vendas: requests={_V115_STATS['item_requests']} sold_found={_V115_STATS['sold_found']} errors={_V115_STATS['errors']} workers={_V115_MAX_WORKERS}", flush=True)
     return enriched
 
-
-_v119_enrich_ml = _v115_enrich_ml
-print("[V11.11.10] fallback de vendas otimizado ativo | paralelo + maior sold_quantity", flush=True)
+print("[V11.11.10] fallback de vendas otimizado ativo | namespace do app", flush=True)
