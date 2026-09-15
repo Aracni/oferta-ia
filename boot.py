@@ -31,7 +31,7 @@ _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/7a4115c7f7484eeda23d19a73ab80cacbd43fb54/ml_market_signals_v16.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
 _PATCH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/909141fe8445b6b089f433467b3a538f55023337/opportunity_diagnostic_v1.py"
-_PATCH_PUBLIC_DEMAND = "https://raw.githubusercontent.com/Aracni/oferta-ia/f4751140a544673be2497855b043f187dc6629e3/ml_public_demand_v126.py"
+_PATCH_PUBLIC_DEMAND = "https://raw.githubusercontent.com/Aracni/oferta-ia/cc1085d09e9fdb2d09e448cbcae3f3a18f50c67c/ml_public_demand_v126.py"
 _PATCH_CLEAN_CENTRAL = "https://raw.githubusercontent.com/Aracni/oferta-ia/fea1802a31c9528de79085e50d021073314e2c5c/central_clean_v125.py"
 
 
@@ -82,7 +82,7 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] diagnóstico V12.4: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-_exec_patch(_PATCH_PUBLIC_DEMAND, "sinal público de demanda V12.6")
+_exec_patch(_PATCH_PUBLIC_DEMAND, "sinal público de demanda V12.6 corrigido")
 _exec_patch(_PATCH_CLEAN_CENTRAL, "rota central limpa V12.5")
 
 try:
