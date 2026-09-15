@@ -30,7 +30,7 @@ _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b424
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
-_PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/d72bbc197d72f202856d95d23a22282725f50a3e/ml_market_signals_v14.py"
+_PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/35de297603b1bf621c0ddd174d234766741d4c79/ml_market_signals_v15.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
 _PATCH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/909141fe8445b6b089f433467b3a538f55023337/opportunity_diagnostic_v1.py"
 
@@ -86,7 +86,7 @@ except Exception as exc:
 try:
     market_patch = _load_patch(_PATCH_MARKET)
     exec(compile(market_patch, _PATCH_MARKET, "exec"), oferta_app.__dict__, oferta_app.__dict__)
-    print("[BOOT] sinais de mercado V11.11.14 carregados", flush=True)
+    print("[BOOT] sinais de mercado V12.5 carregados", flush=True)
 except Exception as exc:
     print(f"[BOOT][WARN] sinais de mercado não instalados: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
