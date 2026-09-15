@@ -25,11 +25,12 @@ meli_auto.install(oferta_app.app)
 import meli_fast
 meli_fast.install(oferta_app.app)
 
+_PATCH_ITEM_RECOVERY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a63f187d1bc6c2aa9b68abb6f749fab97c35472c/meli_data_recovery_v1.py"
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/c20e1e4ef421868d1e341e5830d9033ff5baf6ca/ml_sales_fallback_v5.py"
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
-_PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/6f0ab9636ce9586a205606c2c58da6304b3b83ec/ml_market_signals_v14.py"
+_PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/6f0ab9636ce9586a205606c2c58da6304b3b83ec6/ml_market_signals_v14.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
 _PATCH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/909141fe8445b6b089f433467b3a538f55023337/opportunity_diagnostic_v1.py"
 
@@ -46,6 +47,13 @@ def _load_patch(url):
                 time.sleep(1.0 * (attempt + 1))
     raise RuntimeError(f"Não foi possível carregar patch do OFERTA IA: {last_error}") from last_error
 
+
+try:
+    recovery_patch = _load_patch(_PATCH_ITEM_RECOVERY)
+    exec(compile(recovery_patch, _PATCH_ITEM_RECOVERY, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    print("[BOOT] recuperação de dados ITEM V12.5 carregada", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] recuperação ITEM não instalada: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 try:
     patch = _load_patch(_PATCH)
@@ -110,7 +118,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.4"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.5"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] /healthz não registrado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -145,7 +153,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento não instalado: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print('[V12.4] boot resiliente; diagnóstico do motor de oportunidade + motor V12.3 + sinais de mercado + vendas e avaliações ativos', flush=True)
+print('[V12.5] boot resiliente; recuperação ITEM + diagnóstico do motor de oportunidade + motor V12.3 + sinais de mercado + vendas e avaliações ativos', flush=True)
 
 import uvicorn
 
