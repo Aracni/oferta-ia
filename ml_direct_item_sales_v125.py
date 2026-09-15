@@ -83,7 +83,9 @@ def _v125_direct_enrich(items):
             min(100.0, math.log1p(max(0, sold)) / math.log1p(10000) * 100.0), 2
         )
         item["score_provisional"] = item.get("rating") is None
-        item["opportunity_score"] = _v125_rescore(item) if callable(globals().get("_v125_rescore")) else item.get("opportunity_score")
+        rescore = globals().get("_v115_rescore")
+        if callable(rescore):
+            item["opportunity_score"] = rescore(item)
         item["enrichment_version"] = "V12.5-direct-item"
     print(
         "[V12.5] vendas diretas por ITEM: "
