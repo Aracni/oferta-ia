@@ -65,6 +65,33 @@ _ERROR_HELPER = r'''<script>
 </script>
 '''
 
+_BUTTON_FIX = r'''<script>
+(function(){
+  // Fallback robusto: o botão precisa funcionar mesmo se o listener original
+  // do DOMContentLoaded não tiver sido registrado por cache/ordem de scripts.
+  function bindOpportunityButton(){
+    const btn = document.getElementById("runOpportunities");
+    if (!btn || typeof window.loadOpportunities !== "function") return;
+    if (btn.__ofertaButtonFixed) return;
+    btn.__ofertaButtonFixed = true;
+    btn.addEventListener("click", function(){
+      try { window.loadOpportunities(); }
+      catch(e){
+        const status = document.getElementById("opportunityStatus");
+        if (status) status.textContent = "⚠️ " + (e && e.message ? e.message : e);
+      }
+    }, {capture:true});
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", bindOpportunityButton, {once:true});
+  } else {
+    bindOpportunityButton();
+  }
+  setTimeout(bindOpportunityButton, 0);
+})();
+</script>
+'''
+
 
 def install(app):
     html = getattr(app, "HTML", None)
@@ -109,14 +136,18 @@ def install(app):
         html = html[:pos] + "\n" + block + html[pos:]
         location = "dentro da seção de Oportunidades"
 
-    # O helper fica no fim do HTML para substituir a função global jsonFetch
-    # depois que o script original a declarou.
     if "window.ofertaFormatError" not in html:
         body = html.lower().rfind("</body>")
         if body >= 0:
-            html = html[:body] + _ERROR_HELPER + "\n" + html[body:]
+            html = html[:body] + _ERROR_HELPER + "\n" + _BUTTON_FIX + "\n" + html[body:]
         else:
-            html += "\n" + _ERROR_HELPER
+            html += "\n" + _ERROR_HELPER + "\n" + _BUTTON_FIX
+    elif "__ofertaButtonFixed" not in html:
+        body = html.lower().rfind("</body>")
+        if body >= 0:
+            html = html[:body] + _BUTTON_FIX + "\n" + html[body:]
+        else:
+            html += "\n" + _BUTTON_FIX
 
     app.HTML = html
 
@@ -131,4 +162,4 @@ def install(app):
     if niche >= 0 and selector > niche:
         raise RuntimeError("V11.11.5: seletor não ficou antes dos campos de Oportunidades")
 
-    print(f"[V11.11.5] seletor Marketplace + diagnóstico de erro legível | {location}", flush=True)
+    print(f"[V11.11.5] seletor Marketplace + diagnóstico de erro legível + fallback do botão | {location}", flush=True)
