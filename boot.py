@@ -35,6 +35,7 @@ _PATCH_PUBLIC_DEMAND = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/
 _PATCH_DEMAND_SIGNALS = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_demand_signals_v127.py"
 _PATCH_CLEAN_CENTRAL = "https://raw.githubusercontent.com/Aracni/oferta-ia/fea1802a31c9528de79085e50d021073314e2c5c/central_clean_v125.py"
 _PATCH_MELI_AUTH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/meli_auth_diagnostic_v128.py"
+_PATCH_MELI_AUTH_RUNTIME = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/meli_auth_runtime_v129.py"
 
 
 def _load_patch(url):
@@ -84,7 +85,18 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] diagnóstico V12.4: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-_exec_patch(_PATCH_MELI_AUTH_DIAGNOSTIC, "diagnóstico OAuth Mercado Livre V12.8.1")
+# Apenas registra a rota/diagnóstico; não consulta OAuth no boot.
+try:
+    source = _load_patch(_PATCH_MELI_AUTH_DIAGNOSTIC)
+    exec(compile(source, _PATCH_MELI_AUTH_DIAGNOSTIC, "exec"), oferta_app.__dict__, oferta_app.__dict__)
+    install_auth = oferta_app.__dict__.get("install")
+    if callable(install_auth):
+        install_auth(oferta_app.app)
+    print("[BOOT] diagnóstico OAuth Mercado Livre V12.8.1 registrado sem probe no boot", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] diagnóstico OAuth V12.8.1: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
+_exec_patch(_PATCH_MELI_AUTH_RUNTIME, "diagnóstico OAuth V12.9 sob demanda")
 _exec_patch(_PATCH_PUBLIC_DEMAND, "vendas/demanda V12.6 catálogo + fallback público")
 _exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
 _exec_patch(_PATCH_CLEAN_CENTRAL, "rota central limpa V12.5")
@@ -100,7 +112,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.8.1"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.9"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -125,7 +137,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print("[V12.8.1] boot resiliente ativo", flush=True)
+print("[V12.9] boot resiliente ativo", flush=True)
 
 import uvicorn
 if __name__ == "__main__":
