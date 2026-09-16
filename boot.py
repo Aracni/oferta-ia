@@ -26,7 +26,7 @@ meli_fast.install(oferta_app.app)
 _PATCH_ITEM_RECOVERY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a63f187d1bc6c2aa9b68abb6f749fab97c35472c/meli_data_recovery_v1.py"
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/32a0cf2937e6c8759a9f0a0bdfc7933ae6a62977/ml_item_sales_v1.py"
-_PATCH_DIRECT_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/2884d6f5a4d41b647b2d8048d4aa642a96f58516/ml_direct_item_sales_v125.py"
+_PATCH_DIRECT_ITEM_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_direct_item_sales_v125.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
 _PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/7a4115c7f7484eeda23d19a73ab80cacbd43fb54/ml_market_signals_v16.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
@@ -68,7 +68,7 @@ except Exception as exc:
     print(f"[BOOT][WARN] fallback de vendas: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 _exec_patch(_PATCH_ITEM_SALES, "fallback item winner V11.11.16")
-_exec_patch(_PATCH_DIRECT_ITEM_SALES, "vendas diretas por ITEM V12.5")
+_exec_patch(_PATCH_DIRECT_ITEM_SALES, "vendas diretas por ITEM V12.8")
 _exec_patch(_PATCH_REVIEWS, "fallback de avaliações V11.11.13")
 _exec_patch(_PATCH_MARKET, "sinais de mercado V12.5 isolados")
 _exec_patch(_PATCH_OPPORTUNITY, "motor de oportunidade V12.3")
@@ -98,7 +98,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.7"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V12.8"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -123,7 +123,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print("[V12.7] boot resiliente ativo", flush=True)
+print("[V12.8] boot resiliente ativo", flush=True)
 
 import uvicorn
 if __name__ == "__main__":
