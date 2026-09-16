@@ -43,8 +43,6 @@ _SELECTOR = r'''<div id="oferta-market-filter" style="margin:10px 0;padding:10px
 
 _ERROR_HELPER = r'''<script>
 (function(){
-  // O núcleo antigo fazia Error(d.detail). Quando detail é objeto/array,
-  // o navegador transforma isso em "[object Object]". Mostramos o conteúdo real.
   window.ofertaFormatError = function(detail, status){
     if (typeof detail === "string" && detail.trim()) return detail;
     if (detail && typeof detail === "object") {
@@ -67,14 +65,15 @@ _ERROR_HELPER = r'''<script>
 
 _BUTTON_FIX = r'''<script>
 (function(){
-  // Fallback robusto: o botão precisa funcionar mesmo se o listener original
-  // do DOMContentLoaded não tiver sido registrado por cache/ordem de scripts.
   function bindOpportunityButton(){
     const btn = document.getElementById("runOpportunities");
     if (!btn || typeof window.loadOpportunities !== "function") return;
     if (btn.__ofertaButtonFixed) return;
     btn.__ofertaButtonFixed = true;
-    btn.addEventListener("click", function(){
+    btn.addEventListener("click", function(event){
+      // Este listener captura o clique e impede o onclick original de disparar
+      // uma segunda requisição. Assim há exatamente uma busca por toque.
+      event.stopImmediatePropagation();
       try { window.loadOpportunities(); }
       catch(e){
         const status = document.getElementById("opportunityStatus");
@@ -98,18 +97,10 @@ def install(app):
     if not isinstance(html, str):
         raise RuntimeError("V11.11.5: HTML da aplicação não encontrado")
 
-    html = re.sub(
-        r'<div id="(?:oferta-market-filter|v119-market-filter)"[\s\S]*?</script>\s*',
-        '',
-        html,
-        flags=re.IGNORECASE,
-    )
+    html = re.sub(r'<div id="(?:oferta-market-filter|v119-market-filter)"[\s\S]*?</script>\s*', '', html, flags=re.IGNORECASE)
 
     block = _SELECTOR.strip() + "\n"
-    anchors = [
-        r'<input\s+id=["\']opportunityNiche["\'][^>]*>',
-        r'<input[^>]*\bid=["\']opportunityNiche["\'][^>]*>',
-    ]
+    anchors = [r'<input\s+id=["\']opportunityNiche["\'][^>]*>', r'<input[^>]*\bid=["\']opportunityNiche["\'][^>]*>']
     anchor = None
     for expr in anchors:
         anchor = re.search(expr, html, flags=re.IGNORECASE)
@@ -120,33 +111,24 @@ def install(app):
         html = html[:anchor.start()] + block + html[anchor.start():]
         location = "antes de opportunityNiche"
     else:
-        section = re.search(
-            r'<section[^>]*id=["\']opportunitySection["\'][^>]*>',
-            html,
-            flags=re.IGNORECASE,
-        )
+        section = re.search(r'<section[^>]*id=["\']opportunitySection["\'][^>]*>', html, flags=re.IGNORECASE)
         if not section:
             raise RuntimeError("V11.11.5: seção de Oportunidades não encontrada")
-        form = re.search(
-            r'<div[^>]*class=["\']form["\'][^>]*>',
-            html[section.end():],
-            flags=re.IGNORECASE,
-        )
+        form = re.search(r'<div[^>]*class=["\']form["\'][^>]*>', html[section.end():], flags=re.IGNORECASE)
         pos = section.end() + (form.start() if form else 0)
         html = html[:pos] + "\n" + block + html[pos:]
         location = "dentro da seção de Oportunidades"
 
-    if "window.ofertaFormatError" not in html:
-        body = html.lower().rfind("</body>")
-        if body >= 0:
+    body = html.lower().rfind("</body>")
+    if body >= 0:
+        if "window.ofertaFormatError" not in html:
             html = html[:body] + _ERROR_HELPER + "\n" + _BUTTON_FIX + "\n" + html[body:]
-        else:
-            html += "\n" + _ERROR_HELPER + "\n" + _BUTTON_FIX
-    elif "__ofertaButtonFixed" not in html:
-        body = html.lower().rfind("</body>")
-        if body >= 0:
+        elif "__ofertaButtonFixed" not in html:
             html = html[:body] + _BUTTON_FIX + "\n" + html[body:]
-        else:
+    else:
+        if "window.ofertaFormatError" not in html:
+            html += "\n" + _ERROR_HELPER + "\n" + _BUTTON_FIX
+        elif "__ofertaButtonFixed" not in html:
             html += "\n" + _BUTTON_FIX
 
     app.HTML = html
