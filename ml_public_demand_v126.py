@@ -1,8 +1,8 @@
 """OFERTA IA V12.6 — recuperação de vendas via produto de catálogo.
 
-Usa o detalhe /products/{PRODUCT_ID}, que expõe sold_quantity do produto/PDP.
-Depois tenta /products/{PRODUCT_ID}/items e, por fim, busca pública.
-Só aceita sold_quantity explicitamente retornado pela API. Nunca inventa vendas.
+Tenta primeiro a leitura pública do produto de catálogo/PDP. Quando o endpoint
+exige autorização, tenta a sessão OAuth existente. Só aceita sold_quantity
+explicitamente retornado pela API. Nunca inventa vendas.
 """
 import math
 import re
@@ -59,43 +59,88 @@ def _v126_status_record(status):
         _V126_PUBLIC_STATS["status_other"] += 1
 
 
+def _v126_public_get(url, stage):
+    """GET sem Authorization: útil para recursos realmente públicos."""
+    _V126_PUBLIC_STATS["requests"] += 1
+    try:
+        response = requests.get(
+            url,
+            headers={"Accept": "application/json", "User-Agent": "OFERTA-IA/12.6"},
+            timeout=6,
+        )
+        status = int(response.status_code or 0)
+        _v126_status_record(status)
+        if response.ok:
+            data = response.json()
+            if isinstance(data, dict):
+                _V126_PUBLIC_STATS["unauth_ok"] += 1
+                return data, status
+        return None, status
+    except Exception as exc:
+        print(f"[V12.6][{stage}] falha={type(exc).__name__}", flush=True)
+        _V126_PUBLIC_STATS["errors"] += 1
+        return None, None
+
+
 def _v126_catalog_product(catalog_id, token):
-    """Detalhe da PDP: a API documenta sold_quantity no produto de catálogo."""
-    if not catalog_id or not token:
+    """Detalhe da PDP: primeiro sem token; depois com OAuth."""
+    if not catalog_id:
         return None
     url = f"https://api.mercadolibre.com/products/{catalog_id}"
+
+    # Primeiro, não envia credencial. Se a PDP for pública, aproveitamos.
+    data, status = _v126_public_get(url, "CATALOG_PRODUCT_PUBLIC")
+    if isinstance(data, dict) and data.get("sold_quantity") is not None:
+        _V126_PUBLIC_STATS["catalog_ok"] += 1
+        return data
+
+    # Se o recurso exigir autorização, usa a conexão OAuth do OFERTA IA.
+    if not token:
+        return None
     try:
         data, status = _v11_fetch_json(token, url, timeout=6, stage="CATALOG_PRODUCT_V12_6")
         status = int(status or 0)
         if isinstance(data, dict) and 200 <= status < 300:
             _V126_PUBLIC_STATS["catalog_ok"] += 1
+            _V126_PUBLIC_STATS["token_ok"] += 1
             if data.get("sold_quantity") is not None:
                 return data
         _v126_status_record(status)
     except Exception as exc:
-        print(f"[V12.6][CATALOG_PRODUCT] falha={type(exc).__name__}", flush=True)
+        print(f"[V12.6][CATALOG_PRODUCT_AUTH] falha={type(exc).__name__}", flush=True)
     return None
 
 
 def _v126_catalog_items(catalog_id, token):
-    """Lista de anúncios da PDP; usada somente quando o detalhe não traz vendas."""
-    if not catalog_id or not token:
+    """Lista da PDP; primeiro pública, depois autenticada."""
+    if not catalog_id:
         return []
     url = f"https://api.mercadolibre.com/products/{catalog_id}/items"
+
+    data, status = _v126_public_get(url, "CATALOG_ITEMS_PUBLIC")
+    if isinstance(data, dict):
+        rows = list(data.get("results") or [])
+        if rows:
+            _V126_PUBLIC_STATS["catalog_ok"] += 1
+            return rows
+
+    if not token:
+        return []
     try:
         data, status = _v11_fetch_json(token, url, timeout=6, stage="CATALOG_ITEMS_V12_6")
         status = int(status or 0)
         if isinstance(data, dict) and 200 <= status < 300:
             _V126_PUBLIC_STATS["catalog_ok"] += 1
+            _V126_PUBLIC_STATS["token_ok"] += 1
             return list(data.get("results") or [])
         _v126_status_record(status)
     except Exception as exc:
-        print(f"[V12.6][CATALOG_ITEMS] falha={type(exc).__name__}", flush=True)
+        print(f"[V12.6][CATALOG_ITEMS_AUTH] falha={type(exc).__name__}", flush=True)
     return []
 
 
 def _v126_public_search(title):
-    """Fallback público sem token; uma única tentativa, sem retry de 403."""
+    """Fallback público de busca; uma única tentativa, sem retry de 403."""
     _V126_PUBLIC_STATS["requests"] += 1
     query = urllib.parse.urlencode({"q": str(title or "")[:180], "limit": 50})
     url = f"https://api.mercadolibre.com/sites/MLB/search?{query}"
@@ -136,14 +181,10 @@ def _v126_enrich(items):
         catalog_id = _v126_catalog_id(item)
         chosen = None
 
-        # Caminho principal: detalhe da PDP. A documentação do Mercado Livre
-        # expõe sold_quantity diretamente em /products/{PRODUCT_ID}.
-        if catalog_id and token:
+        if catalog_id:
             chosen = _v126_catalog_product(catalog_id, token)
 
-        # Segundo caminho: anúncios da PDP. Só considera uma linha se ela
-        # realmente trouxer sold_quantity; isso evita bloquear o fallback.
-        if chosen is None and catalog_id and token:
+        if chosen is None and catalog_id:
             rows = _v126_catalog_items(catalog_id, token)
             if rows:
                 if item_id:
@@ -155,8 +196,6 @@ def _v126_enrich(items):
                 if chosen is not None:
                     _V126_PUBLIC_STATS["matched"] += 1
 
-        # Fallback: busca pública somente se os endpoints de catálogo não
-        # trouxeram sold_quantity.
         if chosen is None and title:
             results = _v126_public_search(title)
             if results:
@@ -202,11 +241,11 @@ def _v126_enrich(items):
         f"requests={_V126_PUBLIC_STATS['requests']} catalog_ok={_V126_PUBLIC_STATS['catalog_ok']} "
         f"matched={_V126_PUBLIC_STATS['matched']} found={_V126_PUBLIC_STATS['found']} "
         f"errors={_V126_PUBLIC_STATS['errors']} public_ok={_V126_PUBLIC_STATS['unauth_ok']} "
-        f"403={_V126_PUBLIC_STATS['status_403']} other={_V126_PUBLIC_STATS['status_other']}",
+        f"token_ok={_V126_PUBLIC_STATS['token_ok']} 403={_V126_PUBLIC_STATS['status_403']} other={_V126_PUBLIC_STATS['status_other']}",
         flush=True,
     )
     return enriched
 
 
 _v119_enrich_ml = _v126_enrich
-print("[V12.6] vendas: detalhe products/{catalog} com sold_quantity + fallback seguro")
+print("[V12.6] vendas: catálogo público sem token + OAuth quando permitido + fallback seguro", flush=True)
