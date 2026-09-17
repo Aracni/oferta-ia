@@ -85,7 +85,7 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] diagnóstico V12.4: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-# Apenas registra a rota/diagnóstico; não consulta OAuth no boot.
+# Registra a rota/diagnóstico V12.8.1; não consulta OAuth no boot.
 try:
     source = _load_patch(_PATCH_MELI_AUTH_DIAGNOSTIC)
     exec(compile(source, _PATCH_MELI_AUTH_DIAGNOSTIC, "exec"), oferta_app.__dict__, oferta_app.__dict__)
@@ -96,7 +96,18 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] diagnóstico OAuth V12.8.1: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
-_exec_patch(_PATCH_MELI_AUTH_RUNTIME, "diagnóstico OAuth V12.9 sob demanda")
+# V12.9 define o middleware no namespace do app; instala explicitamente após o exec.
+try:
+    _exec_patch(_PATCH_MELI_AUTH_RUNTIME, "diagnóstico OAuth V12.9 sob demanda")
+    install_runtime = oferta_app.__dict__.get("install")
+    if callable(install_runtime):
+        install_runtime(oferta_app.app)
+        print("[BOOT] middleware OAuth V12.9 instalado", flush=True)
+    else:
+        print("[BOOT][WARN] middleware OAuth V12.9 não encontrou install()", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] instalação OAuth V12.9: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+
 _exec_patch(_PATCH_PUBLIC_DEMAND, "vendas/demanda V12.6 catálogo + fallback público")
 _exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
 _exec_patch(_PATCH_CLEAN_CENTRAL, "rota central limpa V12.5")
