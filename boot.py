@@ -58,6 +58,27 @@ def _exec_patch(url, label):
         print(f"[BOOT][WARN] {label}: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
 
 _exec_patch(_PATCH_ITEM_RECOVERY, "recuperação de dados ITEM V12.5")
+
+# Correção de integridade: ausência de sold_quantity não pode virar vendas=0.
+# O núcleo antigo usava "or 0" ao sintetizar itens do índice; preservamos a
+# ausência para que o motor trate vendas desconhecidas como desconhecidas.
+try:
+    _orig_synthetic_item = getattr(oferta_app, "_v11_synthetic_item", None)
+    if callable(_orig_synthetic_item) and not getattr(_orig_synthetic_item, "_oferta_sales_absence_fixed", False):
+        def _safe_synthetic_item(item_id):
+            data = _orig_synthetic_item(item_id)
+            index = getattr(oferta_app, "_V11_ITEM_INDEX", {}) or {}
+            row = index.get(str(item_id), {}) if isinstance(index, dict) else {}
+            if isinstance(data, dict) and isinstance(row, dict) and row.get("sold_quantity") is None:
+                for _key in ("sold_quantity", "sales", "sales_count"):
+                    data.pop(_key, None)
+            return data
+        _safe_synthetic_item._oferta_sales_absence_fixed = True
+        oferta_app._v11_synthetic_item = _safe_synthetic_item
+        print("[BOOT] integridade de vendas: ausência permanece como desconhecida", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] integridade de vendas: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+
 _exec_patch(_PATCH, "V11.11.6")
 
 _exec_patch(_PATCH_REVIEWS, "fallback de avaliações V11.11.13")
