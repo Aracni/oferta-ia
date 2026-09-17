@@ -1,4 +1,4 @@
-"""OFERTA IA V13 — vendas reais somente pela conta Mercado Livre autorizada.
+"""OFERTA IA V13.2 — vendas reais somente pela conta Mercado Livre autorizada.
 
 Fonte: /orders/search filtrada pelo seller do usuário OAuth.
 Nunca usa sold_quantity de anúncios de terceiros e nunca transforma ranking/demanda em vendas.
@@ -6,9 +6,10 @@ Nunca usa sold_quantity de anúncios de terceiros e nunca transforma ranking/dem
 from datetime import datetime, timedelta, timezone
 import re
 import requests
-from fastapi import Query
 
 _V13_STATS = {"orders_requests": 0, "orders_ok": 0, "orders_errors": 0, "units_found": 0, "items_matched": 0}
+_V13_CACHE = {"sales": None, "meta": None, "expires_at": None}
+_V13_CACHE_TTL_SECONDS = 600
 
 
 def _token():
@@ -37,7 +38,11 @@ def _item_id(value):
 
 def _seller_id(token):
     try:
-        r = requests.get("https://api.mercadolibre.com/users/me", headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/13.0"}, timeout=8)
+        r = requests.get(
+            "https://api.mercadolibre.com/users/me",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/13.2"},
+            timeout=8,
+        )
         if r.ok:
             body = r.json()
             return body.get("id") if isinstance(body, dict) else None
@@ -46,14 +51,24 @@ def _seller_id(token):
     return None
 
 
-def _load_authorized_sales():
+def _load_authorized_sales(force=False):
+    now = datetime.now(timezone.utc)
+    cached_until = _V13_CACHE.get("expires_at")
+    if not force and _V13_CACHE.get("sales") is not None and cached_until and now < cached_until:
+        return dict(_V13_CACHE["sales"]), dict(_V13_CACHE["meta"] or {})
+
     token = _token()
     if not token:
-        return {}, {"status": None, "error": "token_missing"}
+        meta = {"status": None, "error": "token_missing"}
+        _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=60)})
+        return {}, meta
+
     seller = _seller_id(token)
     if not seller:
-        return {}, {"status": None, "error": "seller_id_unavailable"}
-    now = datetime.now(timezone.utc)
+        meta = {"status": None, "error": "seller_id_unavailable"}
+        _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=60)})
+        return {}, meta
+
     start = now - timedelta(days=30)
     params = {
         "seller": str(seller),
@@ -66,10 +81,19 @@ def _load_authorized_sales():
     }
     _V13_STATS["orders_requests"] += 1
     try:
-        r = requests.get("https://api.mercadolibre.com/orders/search", params=params, headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/13.0"}, timeout=12)
+        r = requests.get(
+            "https://api.mercadolibre.com/orders/search",
+            params=params,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json", "User-Agent": "OFERTA-IA/13.2"},
+            timeout=12,
+        )
         if not r.ok:
             _V13_STATS["orders_errors"] += 1
-            return {}, {"status": r.status_code, "error": "orders_search_forbidden_or_failed"}
+            meta = {"status": r.status_code, "error": "orders_search_forbidden_or_failed"}
+            # Cache authorization failures briefly so every candidate does not retry the same 403.
+            _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=300)})
+            return {}, meta
+
         body = r.json()
         totals = {}
         for order in (body.get("results") or []):
@@ -83,12 +107,17 @@ def _load_authorized_sales():
                 qty = oi.get("quantity")
                 if iid and isinstance(qty, (int, float)) and qty >= 0:
                     totals[iid] = totals.get(iid, 0) + qty
+
         _V13_STATS["orders_ok"] += 1
         _V13_STATS["units_found"] += int(sum(totals.values()))
-        return totals, {"status": 200, "seller_id": seller, "orders": len(body.get("results") or []), "paging_total": (body.get("paging") or {}).get("total")}
+        meta = {"status": 200, "seller_id": seller, "orders": len(body.get("results") or []), "paging_total": (body.get("paging") or {}).get("total")}
+        _V13_CACHE.update({"sales": dict(totals), "meta": dict(meta), "expires_at": now + timedelta(seconds=_V13_CACHE_TTL_SECONDS)})
+        return totals, meta
     except Exception as exc:
         _V13_STATS["orders_errors"] += 1
-        return {}, {"status": None, "error": type(exc).__name__}
+        meta = {"status": None, "error": type(exc).__name__}
+        _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=60)})
+        return {}, meta
 
 
 def _v13_enrich(items):
@@ -113,10 +142,9 @@ def _v13_enrich(items):
                 item["sales_authorized"] = True
                 matched += 1
             elif not item.get("sales_authorized"):
-                # Third-party candidates must not inherit guessed sales.
                 item["sales_authorized"] = False
         _V13_STATS["items_matched"] += matched
-        print(f"[V13] vendas autorizadas: orders_status={meta.get('status')} orders={meta.get('orders', 0)} matched_items={matched} units_30d={sum(sales.values()) if sales else 0}", flush=True)
+        print(f"[V13.2] vendas autorizadas: orders_status={meta.get('status')} orders={meta.get('orders', 0)} matched_items={matched} units_30d={sum(sales.values()) if sales else 0}", flush=True)
     except Exception as exc:
         print(f"[V13][WARN] vendas autorizadas: {type(exc).__name__}: {str(exc)[:220]}", flush=True)
     return items
@@ -126,14 +154,24 @@ _v13_enrich._v13_wrapped = True
 
 def install(app):
     app.state.oferta_v13_sales = _load_authorized_sales
+
     @app.get("/api/mercadolivre/vendas-autorizadas", include_in_schema=False)
     async def _sales_diagnostic():
-        sales, meta = _load_authorized_sales()
-        return {"source": "orders/search", "period_days": 30, "authorized_seller": bool(meta.get("seller_id")), "meta": meta, "items_with_sales": len(sales), "total_units": int(sum(sales.values())) if sales else 0, "stats": dict(_V13_STATS)}
+        sales, meta = _load_authorized_sales(force=True)
+        return {
+            "source": "orders/search",
+            "period_days": 30,
+            "authorized_seller": bool(meta.get("seller_id")),
+            "meta": meta,
+            "items_with_sales": len(sales),
+            "total_units": int(sum(sales.values())) if sales else 0,
+            "stats": dict(_V13_STATS),
+        }
+
     base = globals().get("_v119_enrich_ml")
     if callable(base) and not getattr(base, "_v13_base", False):
         def wrapped(items):
             return _v13_enrich(items)
         wrapped._v13_base = base
         globals()["_v119_enrich_ml"] = wrapped
-    print("[V13] fonte autorizada de vendas /orders/search instalada", flush=True)
+    print("[V13.2] fonte autorizada de vendas /orders/search instalada com cache", flush=True)
