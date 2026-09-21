@@ -24,17 +24,19 @@ class MainActivity : AppCompatActivity() {
         val incoming = intent?.data
         if (incoming?.scheme == "ofertaia" && incoming.host == "affiliate") {
             val url = incoming.getQueryParameter("url")
+            val tag = incoming.getQueryParameter("tag") ?: ""
             if (!url.isNullOrBlank()) {
                 web.loadUrl(portal)
-                web.postDelayed({ generate(url) }, 1800)
+                web.postDelayed({ generate(url, tag) }, 1800)
                 return
             }
         }
         web.loadUrl(portal)
     }
 
-    private fun generate(productUrl: String) {
+    private fun generate(productUrl: String, tag: String) {
         val safe = productUrl.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+        val safeTag = tag.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
         val js = """
             (async function() {
               try {
@@ -42,12 +44,12 @@ class MainActivity : AppCompatActivity() {
                   method:'POST',
                   credentials:'include',
                   headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
-                  body:JSON.stringify({urls:['$safe'],tag:''})
+                  body:JSON.stringify({urls:['$safe'],tag:'$safeTag'})
                 });
                 const d=await r.text();
-                location.href='ofertaia://affiliate/result?data='+encodeURIComponent(d);
+                location.href='https://oferta-ia.onrender.com/?affiliate_url='+encodeURIComponent(d);
               } catch(e) {
-                location.href='ofertaia://affiliate/result?error='+encodeURIComponent(String(e));
+                location.href='https://oferta-ia.onrender.com/?affiliate_error='+encodeURIComponent(String(e));
               }
             })();
         """.trimIndent()
