@@ -177,6 +177,9 @@ def install(app):
  const connect=document.getElementById('oferta-affiliate-connect');
  const status=document.getElementById('oferta-affiliate-status');
  if(!connect) return;
+ const params=new URLSearchParams(location.search); const result=params.get('affiliate_url'); const err=params.get('affiliate_error');
+ if(result){ status.textContent='🟢 Link de afiliado recebido da ponte Android.'; const box=document.createElement('div'); box.style='margin-top:10px;word-break:break-all'; box.innerHTML='<strong>Link:</strong> <a target="_blank" rel="noopener" href="'+result.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'">'+result.replace(/</g,'&lt;')+'</a>'; document.getElementById('oferta-affiliate-bridge').appendChild(box); }
+ if(err){ status.textContent='⚠️ A ponte não conseguiu gerar o link. Abra o Portal do Afiliado e tente novamente.'; }
  connect.onclick=function(){ window.open(portal,'_blank'); status.textContent='🟡 Faça login no Mercado Livre e use a ponte Android para gerar o link sem compartilhar sua senha.'; };
 })();
 </script>'''
