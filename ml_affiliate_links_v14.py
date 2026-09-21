@@ -150,4 +150,40 @@ def install(app):
             # Não expõe cookie, token ou resposta sensível.
             raise HTTPException(status_code=502, detail=f"Não foi possível gerar o link de afiliado: {type(exc).__name__}: {str(exc)[:220]}")
 
-    print("[V14] Gerador de Links ML instalado | senha não coletada | geração sob demanda", flush=True)
+    @app.get("/api/mercadolivre/afiliado/mobile", include_in_schema=False)
+    async def affiliate_mobile(url: str = "", tag: str = ""):
+        from urllib.parse import quote
+        clean_url = str(url or "").strip()
+        clean_tag = str(tag or "").strip() or str(_conn().get("affiliate_tag") or "").strip()
+        if not clean_url or not clean_url.startswith("http"):
+            raise HTTPException(status_code=400, detail="URL do produto inválida.")
+        if "mercadolivre.com.br" not in clean_url.lower() and "mercadolibre.com" not in clean_url.lower():
+            raise HTTPException(status_code=400, detail="A URL precisa ser do Mercado Livre.")
+        if not clean_tag:
+            raise HTTPException(status_code=409, detail="Configure sua etiqueta de afiliado primeiro.")
+        deep = "ofertaia://affiliate?url=" + quote(clean_url, safe="") + "&tag=" + quote(clean_tag, safe="")
+        return {"status":"ok","deep_link":deep,"mode":"android_bridge","note":"A sessão permanece no aparelho; senha e cookie não são enviados ao servidor."}
+
+    try:
+        html = getattr(app, "HTML", "")
+        mobile_ui = '''<section id="oferta-affiliate-bridge" style="margin:14px 0;padding:14px;border:1px solid rgba(255,255,255,.14);border-radius:14px">
+<strong>🔗 Afiliado Mercado Livre</strong>
+<div id="oferta-affiliate-status" style="margin:6px 0 10px;opacity:.86">Gerador pronto para conexão pelo celular.</div>
+<button id="oferta-affiliate-connect" type="button">🟡 Conectar Mercado Livre</button>
+</section>
+<script>
+(function(){
+ const portal='https://www.mercadolivre.com.br/afiliados/linkbuilder';
+ const connect=document.getElementById('oferta-affiliate-connect');
+ const status=document.getElementById('oferta-affiliate-status');
+ if(!connect) return;
+ connect.onclick=function(){ window.open(portal,'_blank'); status.textContent='🟡 Faça login no Mercado Livre e use a ponte Android para gerar o link sem compartilhar sua senha.'; };
+})();
+</script>'''
+        if "id=\"oferta-affiliate-bridge\"" not in html and "</body>" in html:
+            app.HTML = html.replace("</body>", mobile_ui + "</body>")
+            print("[V14.1] UI de conexão móvel do afiliado instalada", flush=True)
+    except Exception as exc:
+        print(f"[V14.1][WARN] UI afiliado móvel: {type(exc).__name__}: {str(exc)[:220]}", flush=True)
+
+    print("[V14.1] Gerador de Links ML instalado | senha não coletada | geração sob demanda", flush=True)
