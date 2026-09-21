@@ -26,7 +26,7 @@ meli_fast.install(oferta_app.app)
 _PATCH_ITEM_RECOVERY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a63f187d1bc6c2aa9b68abb6f749fab97c35472c/meli_data_recovery_v1.py"
 _PATCH = "https://raw.githubusercontent.com/Aracni/oferta-ia/081d99d469525f6b4248783fdeac99fd9f33073c/ml_enrichment_v3.py"
 _PATCH_REVIEWS = "https://raw.githubusercontent.com/Aracni/oferta-ia/fe4a64fee34bb79f6eeef72ef4c4d860b464e21f/ml_reviews_fallback_v2.py"
-_PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/7a4115c7f7484eeda23d19a73ab80cacbd43fb54/ml_market_signals_v16.py"
+_PATCH_MARKET = "https://raw.githubusercontent.com/Aracni/oferta-ia/7a4115c7f7484eeda23d19a73ab80cacbd43fb54c/ml_market_signals_v16.py"
 _PATCH_OPPORTUNITY = "https://raw.githubusercontent.com/Aracni/oferta-ia/a3192bae80c4b89a45347677af54a9e231b74bb6/opportunity_engine_v12_3.py"
 _PATCH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/909141fe8445b6b089f433467b3a538f55023337/opportunity_diagnostic_v1.py"
 _PATCH_DEMAND_SIGNALS = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_demand_signals_v127.py"
@@ -34,7 +34,6 @@ _PATCH_CLEAN_CENTRAL = "https://raw.githubusercontent.com/Aracni/oferta-ia/fea18
 _PATCH_MELI_AUTH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/meli_auth_diagnostic_v128.py"
 _PATCH_MELI_AUTH_RUNTIME = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/meli_auth_runtime_v129.py"
 _PATCH_AUTH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_authorized_sales_v13.py"
-
 
 def _load_patch(url):
     last_error = None
@@ -48,7 +47,6 @@ def _load_patch(url):
                 time.sleep(attempt + 1)
     raise RuntimeError(f"Não foi possível carregar patch do OFERTA IA: {last_error}") from last_error
 
-
 def _exec_patch(url, label):
     try:
         source = _load_patch(url)
@@ -59,9 +57,6 @@ def _exec_patch(url, label):
 
 _exec_patch(_PATCH_ITEM_RECOVERY, "recuperação de dados ITEM V12.5")
 
-# Correção de integridade: ausência de sold_quantity não pode virar vendas=0.
-# O núcleo antigo usava "or 0" ao sintetizar itens do índice; preservamos a
-# ausência para que o motor trate vendas desconhecidas como desconhecidas.
 try:
     _orig_synthetic_item = getattr(oferta_app, "_v11_synthetic_item", None)
     if callable(_orig_synthetic_item) and not getattr(_orig_synthetic_item, "_oferta_sales_absence_fixed", False):
@@ -80,7 +75,6 @@ except Exception as exc:
     print(f"[BOOT][WARN] integridade de vendas: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
 _exec_patch(_PATCH, "V11.11.6")
-
 _exec_patch(_PATCH_REVIEWS, "fallback de avaliações V11.11.13")
 _exec_patch(_PATCH_MARKET, "sinais de mercado V12.5 isolados")
 _exec_patch(_PATCH_OPPORTUNITY, "motor de oportunidade V12.3")
@@ -114,31 +108,37 @@ try:
     else:
         print("[BOOT][WARN] middleware OAuth V12.9 não encontrou install()", flush=True)
 except Exception as exc:
-    print(f"[BOOT][WARN] instalação OAuth V12.9: {type(exc).__name__}: {str(exc)[:400]}", flush=True)
+    print(f"[BOOT][WARN] instalação OAuth V12.9: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-# V12.6 e os antigos fallbacks de vendas por /items foram removidos do pipeline
-# principal. Esses endpoints de terceiros retornam 403 por isolamento de seller e
-# geravam chamadas bloqueadas sem produzir vendas legítimas.
-# V12.7 continua ativo sobre o enriquecimento base e usa somente sinais legítimos
-# de demanda (/trends e /highlights), sem converter ranking em vendas.
 _exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
-
-# V13: fonte autorizada de vendas reais da conta OAuth do vendedor.
 _exec_patch(_PATCH_AUTH_SALES, "vendas autorizadas V13 via Orders")
 
-# Preserva explicitamente as funções-base que a rota central limpa usa como
-# fonte. Alguns patches de runtime substituem apenas os endpoints e podem
-# deixar esses aliases ausentes no namespace global.
+# A rota central limpa referencia três funções-base. Alguns patches podem
+# substituir os endpoints e apagar aliases históricos; preservamos os três
+# explicitamente antes de instalar a rota limpa.
 try:
     if not callable(getattr(oferta_app, "_V119_ORIGINAL_CENTRAL", None)):
         _central_base = getattr(oferta_app, "opportunities_central", None)
         if callable(_central_base):
             oferta_app._V119_ORIGINAL_CENTRAL = _central_base
+
     if not callable(getattr(oferta_app, "_V119_ORIGINAL_ML", None)):
         _ml_base = getattr(oferta_app, "mercadolivre_opportunities", None)
         if callable(_ml_base):
             oferta_app._V119_ORIGINAL_ML = _ml_base
-    print(f"[BOOT] aliases centrais preservados | central={callable(getattr(oferta_app, '_V119_ORIGINAL_CENTRAL', None))} ml={callable(getattr(oferta_app, '_V119_ORIGINAL_ML', None))}", flush=True)
+
+    if not callable(getattr(oferta_app, "_V119_ORIGINAL_OPPORTUNITIES_CENTRAL", None)):
+        _central_base = getattr(oferta_app, "opportunities_central", None)
+        if callable(_central_base):
+            oferta_app._V119_ORIGINAL_OPPORTUNITIES_CENTRAL = _central_base
+
+    print(
+        "[BOOT] aliases centrais preservados | "
+        f"central={callable(getattr(oferta_app, '_V119_ORIGINAL_CENTRAL', None))} "
+        f"ml={callable(getattr(oferta_app, '_V119_ORIGINAL_ML', None))} "
+        f"shopee={callable(getattr(oferta_app, '_V119_ORIGINAL_OPPORTUNITIES_CENTRAL', None))}",
+        flush=True,
+    )
 except Exception as exc:
     print(f"[BOOT][WARN] aliases centrais: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
@@ -155,7 +155,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V13.3"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V13.4"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -180,7 +180,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print("[V13.3] boot resiliente ativo; vendas por /items removidas do caminho crítico; Orders autorizado como única fonte de vendas", flush=True)
+print("[V13.4] boot resiliente ativo; vendas por /items removidas do caminho crítico; Orders autorizado como única fonte de vendas", flush=True)
 
 import uvicorn
 if __name__ == "__main__":
