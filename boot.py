@@ -34,6 +34,7 @@ _PATCH_CLEAN_CENTRAL = "https://raw.githubusercontent.com/Aracni/oferta-ia/fea18
 _PATCH_MELI_AUTH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/meli_auth_diagnostic_v128.py"
 _PATCH_MELI_AUTH_RUNTIME = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/meli_auth_runtime_v129.py"
 _PATCH_AUTH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_authorized_sales_v13.py"
+_PATCH_AFFILIATE = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_affiliate_links_v14.py"
 
 def _load_patch(url):
     last_error = None
@@ -112,6 +113,7 @@ except Exception as exc:
 
 _exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
 _exec_patch(_PATCH_AUTH_SALES, "vendas autorizadas V13 via Orders")
+_exec_patch(_PATCH_AFFILIATE, "links de afiliado Mercado Livre V14")
 
 # A rota central limpa referencia três funções-base. Alguns patches podem
 # substituir os endpoints e apagar aliases históricos; preservamos os três
@@ -155,7 +157,7 @@ try:
     if not any(getattr(route, "path", None) == "/healthz" for route in oferta_app.app.routes):
         @oferta_app.app.get("/healthz", include_in_schema=False)
         async def _oferta_healthz():
-            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V13.4"})
+            return JSONResponse({"status": "ok", "app": "OFERTA IA", "boot": "V14.0"})
     print("[HEALTH] /healthz registrado", flush=True)
 except Exception as exc:
     print(f"[HEALTH][WARN] {type(exc).__name__}: {str(exc)[:300]}", flush=True)
@@ -180,7 +182,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print("[V13.4] boot resiliente ativo; vendas por /items removidas do caminho crítico; Orders autorizado como única fonte de vendas", flush=True)
+print("[V14.0] boot resiliente ativo; vendas autorizadas + Gerador de Links ML sob demanda", flush=True)
 
 import uvicorn
 if __name__ == "__main__":
