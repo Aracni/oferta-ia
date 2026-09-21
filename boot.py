@@ -126,6 +126,22 @@ _exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
 # V13: fonte autorizada de vendas reais da conta OAuth do vendedor.
 _exec_patch(_PATCH_AUTH_SALES, "vendas autorizadas V13 via Orders")
 
+# Preserva explicitamente as funções-base que a rota central limpa usa como
+# fonte. Alguns patches de runtime substituem apenas os endpoints e podem
+# deixar esses aliases ausentes no namespace global.
+try:
+    if not callable(getattr(oferta_app, "_V119_ORIGINAL_CENTRAL", None)):
+        _central_base = getattr(oferta_app, "opportunities_central", None)
+        if callable(_central_base):
+            oferta_app._V119_ORIGINAL_CENTRAL = _central_base
+    if not callable(getattr(oferta_app, "_V119_ORIGINAL_ML", None)):
+        _ml_base = getattr(oferta_app, "mercadolivre_opportunities", None)
+        if callable(_ml_base):
+            oferta_app._V119_ORIGINAL_ML = _ml_base
+    print(f"[BOOT] aliases centrais preservados | central={callable(getattr(oferta_app, '_V119_ORIGINAL_CENTRAL', None))} ml={callable(getattr(oferta_app, '_V119_ORIGINAL_ML', None))}", flush=True)
+except Exception as exc:
+    print(f"[BOOT][WARN] aliases centrais: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
+
 _exec_patch(_PATCH_CLEAN_CENTRAL, "rota central limpa V12.5")
 
 try:
