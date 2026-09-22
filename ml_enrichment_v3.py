@@ -9,6 +9,9 @@ _V111_REVIEWS_CACHE = {}
 _V111_PRODUCT_TTL = 300
 _V111_REVIEWS_TTL = 300
 _V111_REVIEWS_BLOCKED = False
+_V111_PRODUCTS_BLOCKED = False
+_V111_PRODUCTS_BLOCKED_AT = 0.0
+_V111_PRODUCTS_BLOCK_TTL = 300
 _V111_STATS = {"product_ok": 0, "product_fail": 0, "sold_found": 0, "rating_found": 0, "reviews_ok": 0, "reviews_blocked": 0}
 
 
@@ -32,7 +35,13 @@ def _v111_cache_get(cache, key, ttl):
 
 
 def _v111_product(pid, token):
+    global _V111_PRODUCTS_BLOCKED, _V111_PRODUCTS_BLOCKED_AT
     pid = str(pid or "").upper().strip()
+    if _V111_PRODUCTS_BLOCKED:
+        if time.time() - _V111_PRODUCTS_BLOCKED_AT < _V111_PRODUCTS_BLOCK_TTL:
+            return None
+        _V111_PRODUCTS_BLOCKED = False
+        _V111_PRODUCTS_BLOCKED_AT = 0.0
     if not pid or not token:
         return None
     cached = _v111_cache_get(_V111_PRODUCT_CACHE, pid, _V111_PRODUCT_TTL)
@@ -50,6 +59,10 @@ def _v111_product(pid, token):
             return data
     except Exception:
         pass
+    if int(status or 0) in (401, 403):
+        _V111_PRODUCTS_BLOCKED = True
+        _V111_PRODUCTS_BLOCKED_AT = time.time()
+        print(f"[V11.11.6] products bloqueado HTTP {int(status)}; demais consultas de produto pausadas por {_V111_PRODUCTS_BLOCK_TTL}s", flush=True)
     _V111_STATS["product_fail"] += 1
     return None
 
