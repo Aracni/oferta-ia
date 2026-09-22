@@ -12,6 +12,7 @@ _V111_REVIEWS_BLOCKED = False
 _V111_PRODUCTS_BLOCKED = False
 _V111_PRODUCTS_BLOCKED_AT = 0.0
 _V111_PRODUCTS_BLOCK_TTL = 300
+_V111_PRODUCT_TIMEOUT = 3
 _V111_STATS = {"product_ok": 0, "product_fail": 0, "sold_found": 0, "rating_found": 0, "reviews_ok": 0, "reviews_blocked": 0}
 
 
@@ -49,7 +50,7 @@ def _v111_product(pid, token):
         return cached
     status = 0
     try:
-        data, status = _v11_fetch_json(token, f"https://api.mercadolibre.com/products/{pid}", timeout=8, stage="ENRICH_V11_11")
+        data, status = _v11_fetch_json(token, f"https://api.mercadolibre.com/products/{pid}", timeout=_V111_PRODUCT_TIMEOUT, stage="ENRICH_V11_11")
         if isinstance(data, dict) and status and 200 <= int(status) < 300:
             _V111_PRODUCT_CACHE[pid] = (time.time(), data)
             _V111_STATS["product_ok"] += 1
@@ -60,10 +61,10 @@ def _v111_product(pid, token):
             return data
     except Exception:
         pass
-    if int(status or 0) in (401, 403):
+    if int(status or 0) in (401, 403) or int(status or 0) == 0:
         _V111_PRODUCTS_BLOCKED = True
         _V111_PRODUCTS_BLOCKED_AT = time.time()
-        print(f"[V11.11.6] products bloqueado HTTP {int(status)}; demais consultas de produto pausadas por {_V111_PRODUCTS_BLOCK_TTL}s", flush=True)
+        print(f"[V11.11.6] products pausado HTTP {int(status)}; demais consultas por {_V111_PRODUCTS_BLOCK_TTL}s", flush=True)
     _V111_STATS["product_fail"] += 1
     return None
 
