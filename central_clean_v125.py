@@ -47,11 +47,9 @@ def _v125_clean_central(payload: dict = Body(default={} )):
         diagnostics.extend(list(base_result.get("diagnostic") or []))
         diagnostics.append(f"Filtro: Ambos · candidatos={len(items)}")
 
-    # Uma única cadeia de enriquecimento: V11.11.6 -> vendas -> sinais -> V12.3.
-    final_enrich = globals().get("_v119_enrich_ml")
-    if callable(final_enrich):
-        items = final_enrich(items)
-
+    # O núcleo original já executa a cadeia de enriquecimento instalada no boot.
+    # NÃO enriquecer novamente aqui: isso duplicava V12.7/V13 por candidato,
+    # multiplicava chamadas e podia levar o garimpo a ~90s.
     items = list(items or [])[:limit]
     ml_count = sum(1 for x in items if str(x.get("marketplace") or "").lower() == "mercadolivre")
     sh_count = sum(1 for x in items if str(x.get("marketplace") or "").lower() == "shopee")
