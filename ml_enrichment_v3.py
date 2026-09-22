@@ -47,6 +47,7 @@ def _v111_product(pid, token):
     cached = _v111_cache_get(_V111_PRODUCT_CACHE, pid, _V111_PRODUCT_TTL)
     if cached is not None:
         return cached
+    status = 0
     try:
         data, status = _v11_fetch_json(token, f"https://api.mercadolibre.com/products/{pid}", timeout=8, stage="ENRICH_V11_11")
         if isinstance(data, dict) and status and 200 <= int(status) < 300:
