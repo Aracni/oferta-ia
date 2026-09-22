@@ -36,38 +36,10 @@ def _v111_cache_get(cache, key, ttl):
 
 
 def _v111_product(pid, token):
-    global _V111_PRODUCTS_BLOCKED, _V111_PRODUCTS_BLOCKED_AT
-    pid = str(pid or "").upper().strip()
-    if _V111_PRODUCTS_BLOCKED:
-        if time.time() - _V111_PRODUCTS_BLOCKED_AT < _V111_PRODUCTS_BLOCK_TTL:
-            return None
-        _V111_PRODUCTS_BLOCKED = False
-        _V111_PRODUCTS_BLOCKED_AT = 0.0
-    if not pid or not token:
-        return None
-    cached = _v111_cache_get(_V111_PRODUCT_CACHE, pid, _V111_PRODUCT_TTL)
-    if cached is not None:
-        return cached
-    status = 0
-    try:
-        data, status = _v11_fetch_json(token, f"https://api.mercadolibre.com/products/{pid}", timeout=_V111_PRODUCT_TIMEOUT, stage="ENRICH_V11_11")
-        if isinstance(data, dict) and status and 200 <= int(status) < 300:
-            _V111_PRODUCT_CACHE[pid] = (time.time(), data)
-            _V111_STATS["product_ok"] += 1
-            try:
-                _v11_remember_product(data)
-            except Exception:
-                pass
-            return data
-    except Exception:
-        pass
-    if int(status or 0) in (401, 403) or int(status or 0) == 0:
-        _V111_PRODUCTS_BLOCKED = True
-        _V111_PRODUCTS_BLOCKED_AT = time.time()
-        print(f"[V11.11.6] products pausado HTTP {int(status)}; demais consultas por {_V111_PRODUCTS_BLOCK_TTL}s", flush=True)
-    _V111_STATS["product_fail"] += 1
+    # A API /products/{id} não fornece os dados de vendas de terceiros que
+    # precisamos e pode responder 401/403. Não faz parte do caminho crítico.
+    # Vendas exatas vêm exclusivamente de /orders/search autorizado (V13).
     return None
-
 
 def _v111_sold(product, winner, row, item):
     for obj in (winner, product, row, item):
