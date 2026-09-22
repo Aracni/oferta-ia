@@ -179,8 +179,15 @@ def _v123_decide(item):
     has_real_demand = sales is not None and sales > 0
     has_economics = discount is not None or commission is not None
     has_quality = rating is not None or _v123_winner_quality(item) is not None
+    provisional = coverage < 85 or rating is None or commission is None
 
-    if score >= 82 and coverage >= 85 and has_real_demand and has_economics and has_quality:
+    # Resultado provisório nunca pode aparecer como EXCEPCIONAL.
+    # Sem vendas reais, avaliação ou comissão verificadas, o score fica limitado
+    # a uma faixa de monitoramento até que os dados faltantes sejam confirmados.
+    if provisional:
+        score = min(score, 79.99)
+
+    if score >= 82 and coverage >= 85 and has_real_demand and has_economics and has_quality and not provisional:
         classification = "EXCELENTE OPORTUNIDADE"
     elif score >= 70 and coverage >= 70 and (has_real_demand or best_seller) and has_economics:
         classification = "BOA OPORTUNIDADE"
@@ -189,7 +196,6 @@ def _v123_decide(item):
     else:
         classification = "DADOS INSUFICIENTES / DESCARTAR"
 
-    provisional = coverage < 85 or rating is None or commission is None
     return round(score, 2), classification, reasons, coverage, provisional
 
 
