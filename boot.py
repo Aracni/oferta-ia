@@ -78,6 +78,7 @@ except Exception as exc:
 _exec_patch(_PATCH, "V11.11.6")
 _exec_patch(_PATCH_REVIEWS, "fallback de avaliações V11.11.13")
 _exec_patch(_PATCH_MARKET, "sinais de mercado V12.5 isolados")
+_exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
 _exec_patch(_PATCH_OPPORTUNITY, "motor de oportunidade V12.3")
 
 try:
@@ -111,7 +112,6 @@ try:
 except Exception as exc:
     print(f"[BOOT][WARN] instalação OAuth V12.9: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-_exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
 _exec_patch(_PATCH_AUTH_SALES, "vendas autorizadas V13 via Orders")
 _exec_patch(_PATCH_AFFILIATE, "links de afiliado Mercado Livre V14")
 
