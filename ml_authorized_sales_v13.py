@@ -10,6 +10,7 @@ import requests
 _V13_STATS = {"orders_requests": 0, "orders_ok": 0, "orders_errors": 0, "units_found": 0, "items_matched": 0}
 _V13_CACHE = {"sales": None, "meta": None, "expires_at": None}
 _V13_CACHE_TTL_SECONDS = 600
+_V13_UNAVAILABLE_TTL_SECONDS = 900
 
 
 def _token():
@@ -60,13 +61,13 @@ def _load_authorized_sales(force=False):
     token = _token()
     if not token:
         meta = {"status": None, "error": "token_missing"}
-        _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=60)})
+        _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=_V13_UNAVAILABLE_TTL_SECONDS)})
         return {}, meta
 
     seller = _seller_id(token)
     if not seller:
         meta = {"status": None, "error": "seller_id_unavailable"}
-        _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=60)})
+        _V13_CACHE.update({"sales": {}, "meta": meta, "expires_at": now + timedelta(seconds=_V13_UNAVAILABLE_TTL_SECONDS)})
         return {}, meta
 
     start = now - timedelta(days=30)
@@ -144,7 +145,10 @@ def _v13_enrich(items):
             elif not item.get("sales_authorized"):
                 item["sales_authorized"] = False
         _V13_STATS["items_matched"] += matched
-        print(f"[V13.2] vendas autorizadas: orders_status={meta.get('status')} orders={meta.get('orders', 0)} matched_items={matched} units_30d={sum(sales.values()) if sales else 0}", flush=True)
+        stamp = meta.get("_logged_at")
+        if stamp != meta.get("status") or meta.get("orders") is not None:
+            print(f"[V13.3] vendas autorizadas: orders_status={meta.get('status')} orders={meta.get('orders', 0)} matched_items={matched} units_30d={sum(sales.values()) if sales else 0}", flush=True)
+            meta["_logged_at"] = meta.get("status")
     except Exception as exc:
         print(f"[V13][WARN] vendas autorizadas: {type(exc).__name__}: {str(exc)[:220]}", flush=True)
     return items
