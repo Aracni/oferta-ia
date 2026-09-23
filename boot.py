@@ -35,6 +35,7 @@ _PATCH_MELI_AUTH_DIAGNOSTIC = "https://raw.githubusercontent.com/Aracni/oferta-i
 _PATCH_MELI_AUTH_RUNTIME = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/meli_auth_runtime_v129.py"
 _PATCH_AUTH_SALES = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_authorized_sales_v13.py"
 _PATCH_AFFILIATE = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_affiliate_links_v14.py"
+_PATCH_SELLING_FEES = "https://raw.githubusercontent.com/Aracni/oferta-ia/main/ml_selling_fees_v141.py"
 
 def _load_patch(url):
     last_error = None
@@ -79,6 +80,7 @@ _exec_patch(_PATCH, "V11.11.6")
 _exec_patch(_PATCH_REVIEWS, "fallback de avaliações V11.11.13")
 _exec_patch(_PATCH_MARKET, "sinais de mercado V12.5 isolados")
 _exec_patch(_PATCH_DEMAND_SIGNALS, "demanda V12.7 tendências + mais vendidos")
+_exec_patch(_PATCH_SELLING_FEES, "tarifas oficiais ML V14.1")
 _exec_patch(_PATCH_OPPORTUNITY, "motor de oportunidade V12.3")
 
 try:
@@ -182,7 +184,7 @@ try:
 except Exception as exc:
     print(f"[EDGE_TRACE][WARN] rastreamento: {type(exc).__name__}: {str(exc)[:300]}", flush=True)
 
-print("[V14.0] boot resiliente ativo; vendas autorizadas + Gerador de Links ML sob demanda", flush=True)
+print("[V14.1] boot resiliente ativo; vendas autorizadas + tarifas oficiais ML + Gerador de Links ML", flush=True)
 
 import uvicorn
 if __name__ == "__main__":
