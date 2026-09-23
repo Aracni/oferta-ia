@@ -6,10 +6,12 @@ usa somente sinais documentados do Mercado Livre: /trends e /highlights.
 import math
 import re
 import requests
+import time
 
 _V127_PREVIOUS = globals().get("_v119_enrich_ml")
 _V127_CACHE = {"trends": None, "highlights": {}}
-_V127_TRENDS_BLOCKED_UNTIL = 0.0\n_V127_TRENDS_BLOCK_TTL = 3600
+_V127_TRENDS_BLOCKED_UNTIL = 0.0
+_V127_TRENDS_BLOCK_TTL = 3600
 
 
 def _v127_norm(value):
@@ -36,12 +38,17 @@ def _v127_get(url, token, timeout=6):
 
 
 def _v127_trends(token):
+    global _V127_TRENDS_BLOCKED_UNTIL
+    if time.time() < _V127_TRENDS_BLOCKED_UNTIL:
+        return []
     if _V127_CACHE["trends"] is not None:
         return _V127_CACHE["trends"]
     data, status = _v127_get("https://api.mercadolibre.com/trends/MLB", token)
     if not isinstance(data, list) or not (200 <= status < 300):
         print(f"[V12.7] trends indisponível http={status}", flush=True)
         _V127_CACHE["trends"] = []
+        if status == 404:
+            _V127_TRENDS_BLOCKED_UNTIL = time.time() + _V127_TRENDS_BLOCK_TTL
         return []
     rows = [x for x in data if isinstance(x, dict) and x.get("keyword")]
     _V127_CACHE["trends"] = rows
