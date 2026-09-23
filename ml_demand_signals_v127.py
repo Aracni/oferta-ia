@@ -8,7 +8,7 @@ import re
 import requests
 
 _V127_PREVIOUS = globals().get("_v119_enrich_ml")
-_V127_CACHE = {"trends": None, "highlights": {}}
+_V127_CACHE = {"trends": None, "highlights": {}}\n_V127_TRENDS_BLOCKED_UNTIL = 0.0\n_V127_TRENDS_BLOCK_TTL = 3600
 
 
 def _v127_norm(value):
